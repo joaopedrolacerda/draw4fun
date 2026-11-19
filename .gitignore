@@ -1,0 +1,6 @@
+/target
+node_modules/
+web/dist/
+web/src/lib/core/pkg/
+.DS_Store
+web/.env.local
