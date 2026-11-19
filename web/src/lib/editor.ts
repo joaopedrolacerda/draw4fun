@@ -4,7 +4,7 @@
 
 import type { Board } from './core';
 import { type Camera, type Vec, initialCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera';
-import { HANDLES, type Handle, type Rect, containsRect, corner, elementRect, groupFrame, groupRect, opposite, rectFrom } from './selection';
+import { HANDLES, type Handle, type Rect, containsRect, corner, cursorFor, elementRect, groupFrame, groupRect, opposite, rectFrom } from './selection';
 import { type LoadedImage, placeImage } from './images';
 import { DEFAULT_FONT_SIZE, type TextSize } from './text';
 
@@ -42,7 +42,10 @@ const MIN_SHAPE_SIZE = 3;
 /** Boneco feito com um clique só (sem arrastar), em unidades do mundo. */
 export const FIGURE_SIZE = { width: 44, height: 80 } as const;
 /** Folga do clique de seleção, em pixels de tela. */
-const HIT_TOLERANCE = 6;
+/** Folga para acertar um traço, em pixels de tela. No dedo, bem maior. */
+const HIT_TOLERANCE = { mouse: 8, touch: 16 };
+/** Quanto o ponteiro anda antes de um clique virar arrasto, em pixels de tela. */
+const DRAG_THRESHOLD = { mouse: 3, touch: 8 };
 /** Raio da borracha, em pixels de tela. */
 const ERASER_RADIUS = 8;
 /** Passo entre amostras da borracha, para não pular elementos num gesto rápido. */
@@ -56,7 +59,18 @@ type Gesture =
   | { kind: 'box'; shape: 'rectangle' | 'figure'; pointer: number; id: string; start: Vec; startScreen: Vec }
   | { kind: 'arrow'; pointer: number; id: string; startScreen: Vec }
   | { kind: 'pencil'; pointer: number; id: string }
-  | { kind: 'move'; pointer: number; ids: string[]; last: Vec }
+  | {
+      kind: 'move';
+      pointer: number;
+      ids: string[];
+      last: Vec;
+      startScreen: Vec;
+      /** Só começa a mover depois de passar do `DRAG_THRESHOLD`: clique parado não mexe em nada. */
+      dragging: boolean;
+      threshold: number;
+      /** Clicou (sem arrastar) num item de uma seleção maior: ao soltar, fica só ele. */
+      narrowTo: string | null;
+    }
   | {
       kind: 'marquee';
       pointer: number;
@@ -236,6 +250,31 @@ export class Editor {
     return null;
   }
 
+  /** Elemento sob o ponto (no mundo), com a folga do tipo de ponteiro. */
+  private hitAt(w: Vec, pointerType: string): string | null {
+    const reach = pointerType === 'touch' ? HIT_TOLERANCE.touch : HIT_TOLERANCE.mouse;
+    return this.board.hitTest(w.x, w.y, reach / this.camera.zoom) ?? null;
+  }
+
+  /** O ponto (no mundo) está dentro da moldura da seleção atual. */
+  private insideSelection(w: Vec): boolean {
+    if (this.selection.length === 0) return false;
+    const frame = groupFrame(this.board, this.selection, this.camera.zoom);
+    return frame !== null && w.x >= frame.minX && w.x <= frame.maxX && w.y >= frame.minY && w.y <= frame.maxY;
+  }
+
+  /**
+   * Cursor para o mouse parado em (sx, sy) na ferramenta de seleção: alça de redimensionar,
+   * mover (sobre um elemento ou dentro da seleção) ou `null` para o padrão.
+   */
+  cursorAt(sx: number, sy: number): string | null {
+    if (this.currentTool !== 'select') return null;
+    const handle = this.handleAt(sx, sy);
+    if (handle) return cursorFor(handle);
+    const w = screenToWorld(this.camera, sx, sy);
+    return this.hitAt(w, 'mouse') || this.insideSelection(w) ? 'move' : null;
+  }
+
   /** Junta uma cópia do desenho vinda de outro aparelho. Lança erro se não conseguir ler. */
   mergeRemote(json: string): void {
     this.board.mergeRemote(json);
@@ -320,7 +359,7 @@ export class Editor {
   /** Texto sob o ponto da tela, se houver. */
   textAt(sx: number, sy: number): string | null {
     const w = screenToWorld(this.camera, sx, sy);
-    const id = this.board.hitTest(w.x, w.y, HIT_TOLERANCE / this.camera.zoom);
+    const id = this.board.hitTest(w.x, w.y, HIT_TOLERANCE.mouse / this.camera.zoom);
     return id && this.board.kind(id) === 'text' ? id : null;
   }
 
@@ -394,7 +433,26 @@ export class Editor {
           this.startResize(p, handle, w);
           return;
         }
-        const hit = this.board.hitTest(w.x, w.y, HIT_TOLERANCE / this.camera.zoom) ?? null;
+        const hit = this.hitAt(w, p.pointerType);
+        const startMove = (narrowTo: string | null) => {
+          const touch = p.pointerType === 'touch';
+          this.gesture = {
+            kind: 'move',
+            pointer: p.id,
+            ids: [...this.selection],
+            last: w,
+            startScreen: { x: p.x, y: p.y },
+            dragging: false,
+            threshold: touch ? DRAG_THRESHOLD.touch : DRAG_THRESHOLD.mouse,
+            narrowTo,
+          };
+        };
+        if (!hit && !p.shift && this.insideSelection(w)) {
+          // Espaço vazio dentro da moldura da seleção: arrasta o grupo, como se tivesse
+          // pegado num dos elementos.
+          startMove(null);
+          return;
+        }
         if (!hit) {
           // Lugar vazio: começa a seleção por caixa (com Shift, soma à seleção atual).
           const base = p.shift ? [...this.selection] : [];
@@ -407,11 +465,16 @@ export class Editor {
           const has = this.selection.includes(hit);
           this.setSelection(has ? this.selection.filter((id) => id !== hit) : [...this.selection, hit]);
           if (has) return;
-        } else if (!this.selection.includes(hit)) {
-          this.select(hit);
+          startMove(null);
+          return;
         }
-        // Arrastar qualquer selecionado leva a seleção inteira junto.
-        this.gesture = { kind: 'move', pointer: p.id, ids: [...this.selection], last: w };
+        if (!this.selection.includes(hit)) {
+          this.select(hit);
+          startMove(null);
+          return;
+        }
+        // Arrastar qualquer selecionado leva a seleção inteira junto; só clicar fica com ele.
+        startMove(this.selection.length > 1 ? hit : null);
         return;
       }
       case 'eraser':
@@ -485,6 +548,10 @@ export class Editor {
         return;
       }
       case 'move': {
+        if (!g.dragging) {
+          if (Math.hypot(p.x - g.startScreen.x, p.y - g.startScreen.y) < g.threshold) return;
+          g.dragging = true;
+        }
         const w = screenToWorld(this.camera, p.x, p.y);
         for (const id of g.ids) this.board.translate(id, w.x - g.last.x, w.y - g.last.y);
         g.last = w;
@@ -565,6 +632,9 @@ export class Editor {
         this.finishStep();
       }
       return;
+    }
+    if (g.kind === 'move' && g.pointer === p.id && !g.dragging && g.narrowTo) {
+      this.select(g.narrowTo);
     }
     if ('pointer' in g && g.pointer === p.id) {
       this.gesture = { kind: 'idle' };

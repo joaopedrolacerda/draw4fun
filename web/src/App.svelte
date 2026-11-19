@@ -13,7 +13,6 @@
   import { Renderer } from './lib/renderer';
   import { BACKGROUNDS, DEFAULT_BACKGROUND, displayInk, isDark } from './lib/background';
   import { DEFAULT_EXPORT } from './lib/exportImage';
-  import { cursorFor } from './lib/selection';
   import { ACCEPTED_TYPES, loadImageFile, pickImageFiles, type LoadedImage } from './lib/images';
   import { BLANK_DIAGRAM, TEMPLATES } from './lib/mermaid';
   import { Autosaver, EmergencyBackup, IndexedDbStore, type SaveStatus } from './lib/storage';
@@ -465,9 +464,7 @@
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
     lastPointer = { x: e.clientX - box.left, y: e.clientY - box.top };
     if (e.buttons === 0 && e.pointerType === 'mouse') {
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const handle = editor.tool === 'select' ? editor.handleAt(e.clientX - r.left, e.clientY - r.top) : null;
-      hoverCursor = handle ? cursorFor(handle) : null;
+      hoverCursor = editor.cursorAt(lastPointer.x, lastPointer.y);
     }
     // Eventos agrupados pelo navegador: sem eles, o traço livre fica com cantos.
     const target = e.currentTarget as HTMLElement;

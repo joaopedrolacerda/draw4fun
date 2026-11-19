@@ -277,6 +277,63 @@ describe('Editor', () => {
       expect(editor.selectedId).toBe(b);
     });
 
+    it('arrastar o vazio dentro da moldura do grupo move o grupo todo', () => {
+      const [a, b] = twoRects();
+      editor.selectAll();
+      editor.pointerDown(mouse(75, 15));
+      editor.pointerMove(mouse(95, 25));
+      editor.pointerUp(mouse(95, 25));
+      expect(editor.selectedIds).toEqual([a, b]);
+      expect(editor.marquee).toBeNull();
+      expect(rectOf(editor.board, a)).toMatchObject({ x: 20, y: 10 });
+      expect(rectOf(editor.board, b)).toMatchObject({ x: 120, y: 10 });
+    });
+
+    it('clique sem arrastar num item do grupo deixa só ele selecionado', () => {
+      const [a, b] = twoRects();
+      editor.selectAll();
+      editor.pointerDown(mouse(100, 15));
+      editor.pointerUp(mouse(100, 15));
+      expect(editor.selectedIds).toEqual([b]);
+      expect(rectOf(editor.board, a)).toMatchObject({ x: 0, y: 0 });
+    });
+
+    it('tremida do clique não move nem vira passo de desfazer', () => {
+      const [a] = twoRects();
+      editor.pointerDown(mouse(0, 15));
+      editor.pointerMove(mouse(2, 16));
+      editor.pointerUp(mouse(2, 16));
+      expect(rectOf(editor.board, a)).toMatchObject({ x: 0, y: 0 });
+      expect(editor.canUndo).toBe(true); // só a criação dos retângulos
+      editor.undo();
+      expect(editor.board.visibleIds()).toEqual([]);
+    });
+
+    it('arrastar passa do limite sem perder o caminho já andado', () => {
+      const [a] = twoRects();
+      editor.pointerDown(mouse(0, 15));
+      editor.pointerMove(mouse(2, 15));
+      editor.pointerMove(mouse(10, 15));
+      editor.pointerUp(mouse(10, 15));
+      expect(rectOf(editor.board, a)).toMatchObject({ x: 10, y: 0 });
+    });
+
+    it('no dedo, a folga para pegar um traço é maior', () => {
+      const [a] = twoRects();
+      editor.pointerDown(finger(1, -14, 15));
+      editor.pointerUp(finger(1, -14, 15));
+      expect(editor.selectedIds).toEqual([a]);
+    });
+
+    it('cursor de mover sobre elemento e dentro da seleção', () => {
+      twoRects();
+      expect(editor.cursorAt(0, 15)).toBe('move');
+      expect(editor.cursorAt(75, 15)).toBeNull();
+      editor.selectAll();
+      expect(editor.cursorAt(75, 15)).toBe('move');
+      expect(editor.cursorAt(75, 200)).toBeNull();
+    });
+
     it('caixa pega só o que fica inteiro dentro dela', () => {
       const [a, b] = twoRects();
       editor.pointerDown(mouse(-10, -10));
