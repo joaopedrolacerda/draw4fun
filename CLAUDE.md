@@ -42,6 +42,7 @@ Rust fica em `~/.cargo/bin` (`export PATH="$HOME/.cargo/bin:$PATH"` se faltar).
   - `npm run check`: svelte-check, precisa terminar com 0 erros.
   - `npm run dev`: gera o WASM e abre em http://localhost:5173.
   - `npm run build`: gera o WASM em release e o site em `web/dist/`.
+- Produção: `Dockerfile` na raiz (Rust → WASM, Vite, Caddy servindo `web/dist` na porta `$PORT`), usado pelo Railway. Versões do wasm-pack e do wasm-bindgen-cli ficam fixas no Dockerfile; ao subir o `wasm-bindgen` no `Cargo.lock`, suba lá também.
 - O WASM gerado vai para `web/src/lib/core/pkg/`, fora do git. Ele sai de `scripts/build-wasm.sh`.
 
 ## Arquitetura da web

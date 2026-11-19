@@ -16,6 +16,26 @@ A janela mostra a prévia enquanto você digita; "Inserir" (ou Ctrl+Enter) põe 
 como imagem, com traço de esboço e a mesma letra do quadro. Para mudar um diagrama, edite o código
 e insira de novo.
 
+## Deploy (Railway)
+O `Dockerfile` da raiz gera a imagem de produção em três etapas: compila o núcleo para WASM
+(Rust + wasm-pack), gera o site com o Vite e serve os arquivos estáticos com o Caddy na
+porta `$PORT` que o Railway informa. O Railway acha o `Dockerfile` sozinho.
+
+1. No Railway, crie um serviço a partir do repositório do GitHub (ou use `railway up` nesta pasta).
+2. Nas variáveis do serviço, crie `VITE_GOOGLE_CLIENT_ID` com o ID do cliente OAuth. Ela entra
+   no build (o Vite grava no site); depois de mudar, faça um novo deploy.
+3. Em **Settings → Networking**, gere um domínio público.
+4. No Google Cloud, no cliente OAuth, acrescente o domínio em **Origens JavaScript autorizadas**
+   (`https://seu-dominio`) e em **URIs de redirecionamento autorizados** (`https://seu-dominio/`,
+   com a barra no fim). Sem isso o login com Google é recusado.
+
+Para testar a imagem localmente:
+
+```bash
+docker build --build-arg VITE_GOOGLE_CLIENT_ID=seu-id -t draw4fun .
+docker run --rm -p 8080:8080 draw4fun
+```
+
 ## Google Drive
 
 O quadro pode ser sincronizado no Google Drive de quem usa. O login é feito direto no navegador,

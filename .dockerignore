@@ -1,0 +1,7 @@
+.git
+target
+**/node_modules
+web/dist
+web/src/lib/core/pkg
+web/.env.local
+.DS_Store
