@@ -49,9 +49,13 @@
   let camera = $state<Camera>({ x: 0, y: 0, zoom: 1 });
   let status = $state<SaveStatus>('saved');
   let notice = $state<string | null>(null);
+  /** Aviso curto que some sozinho (por exemplo, "Copiado como PNG"). */
+  let toast = $state<string | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
   let spaceHeld = $state(false);
   let panning = $state(false);
-  let selected = $state<string | null>(null);
+  /** Quantos elementos estão selecionados (a barra mostra as ações de seleção quando há algum). */
+  let selectedCount = $state(0);
   let editing = $state<TextEditing | null>(null);
   /** Cursor de redimensionar quando o mouse passa por uma alça. */
   let hoverCursor = $state<string | null>(null);
@@ -126,7 +130,8 @@
       const ctx = canvas?.getContext('2d');
       if (!editor || !ctx) return;
       renderer.draw(ctx, editor.board, editor.camera, view.width, view.height, view.dpr, {
-        selectedId: editor.selectedId,
+        selectedIds: editor.selectedIds,
+        marquee: editor.marquee,
         hiddenId: editing?.id ?? null,
       });
       camera = { ...editor.camera };
@@ -221,7 +226,7 @@
   let copiedByEvent = false;
 
   function onCopy(e: ClipboardEvent): void {
-    if (isTyping(e) || !editor?.selectedId || !e.clipboardData) return;
+    if (isTyping(e) || !hasSelection() || !e.clipboardData || !editor) return;
     const json = editor.copySelection();
     if (!json) return;
     e.clipboardData.setData('text/plain', json);
@@ -230,7 +235,7 @@
   }
 
   function onCut(e: ClipboardEvent): void {
-    if (isTyping(e) || !editor?.selectedId || !e.clipboardData) return;
+    if (isTyping(e) || !hasSelection() || !e.clipboardData || !editor) return;
     const json = editor.cutSelection();
     if (!json) return;
     e.clipboardData.setData('text/plain', json);
@@ -271,7 +276,7 @@
    * transferência. Recortar é copiar e depois apagar.
    */
   function copyByKey(cut: boolean): boolean {
-    if (!editor?.selectedId) return false;
+    if (!editor || !hasSelection()) return false;
     const json = editor.copySelection();
     if (!json) return false;
     copiedByEvent = false;
@@ -302,6 +307,38 @@
   function redo(): void {
     commitText();
     editor?.redo();
+  }
+
+  function hasSelection(): boolean {
+    return (editor?.selectedIds.length ?? 0) > 0;
+  }
+
+  function showToast(message: string): void {
+    toast = message;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toast = null), 2000);
+  }
+
+  /**
+   * Copia os selecionados como imagem PNG (fundo branco, 2x). A imagem vai para a área de
+   * transferência como promessa, dentro do clique: o Safari só aceita assim.
+   */
+  async function copySelectionAsPng(): Promise<void> {
+    commitText();
+    const ids = editor ? [...editor.selectedIds] : [];
+    if (!editor || ids.length === 0) return;
+    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+      notice = 'Este navegador não deixa copiar imagens.';
+      return;
+    }
+    try {
+      const png = renderer.renderToPng(editor.board, ids);
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      showToast('Copiado como PNG');
+    } catch (err) {
+      console.error(err);
+      notice = 'O navegador não deixou copiar a imagem.';
+    }
   }
 
   function duplicateSelected(): void {
@@ -473,7 +510,7 @@
       if (editor) editor.spaceHeld = true;
       return;
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && editor?.selectedId) {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && hasSelection()) {
       e.preventDefault();
       deleteSelected();
     } else if (mod && e.key.toLowerCase() === 'z') {
@@ -485,7 +522,16 @@
       redo();
     } else if (mod && !e.shiftKey && (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'x')) {
       if (copyByKey(e.key.toLowerCase() === 'x')) e.preventDefault();
-    } else if (mod && e.key.toLowerCase() === 'd' && editor?.selectedId) {
+    } else if (e.shiftKey && e.altKey && e.code === 'KeyC' && hasSelection()) {
+      // Shift+Alt+C (no Mac, Alt+Shift+C escreve "Ç": por isso o código da tecla).
+      e.preventDefault();
+      void copySelectionAsPng();
+    } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      commitText();
+      tool = 'select';
+      editor?.selectAll();
+    } else if (mod && e.key.toLowerCase() === 'd' && hasSelection()) {
       e.preventDefault();
       duplicateSelected();
     } else if (e.key === 'Escape') {
@@ -607,8 +653,8 @@
           autosaver?.schedule();
         },
         onViewChange: requestDraw,
-        onSelectionChange: (id) => {
-          selected = id;
+        onSelectionChange: (ids) => {
+          selectedCount = ids.length;
           requestDraw();
         },
         onTextRequest: openText,
@@ -722,12 +768,15 @@
         onclick={() => selectColor(c)}
       ></button>
     {/each}
-    {#if selected}
+    {#if selectedCount > 0}
       <span class="divider" aria-hidden="true"></span>
-      <button class="tool" aria-label="Duplicar selecionado" title="Duplicar — Ctrl+D" onclick={duplicateSelected}>
+      <button class="tool" aria-label="Copiar como PNG" title="Copiar como PNG — Shift+Alt+C" onclick={copySelectionAsPng}>
+        <Icon name="copyImage" />
+      </button>
+      <button class="tool" aria-label="Duplicar seleção" title="Duplicar — Ctrl+D" onclick={duplicateSelected}>
         <Icon name="duplicate" />
       </button>
-      <button class="tool danger" aria-label="Apagar selecionado" title="Apagar selecionado — Delete" onclick={deleteSelected}>
+      <button class="tool danger" aria-label="Apagar seleção" title="Apagar — Delete" onclick={deleteSelected}>
         <Icon name="trash" />
       </button>
     {/if}
@@ -764,6 +813,10 @@
       <Icon name="redo" size={18} />
     </button>
   </div>
+
+  {#if toast}
+    <p class="toast" role="status">{toast}</p>
+  {/if}
 
   <p class="status" class:error={status === 'error'} aria-live="polite">{statusText[status]}</p>
 
@@ -997,6 +1050,21 @@
     min-width: 56px;
     font-size: 13px;
     font-variant-numeric: tabular-nums;
+  }
+
+  .toast {
+    position: absolute;
+    bottom: max(64px, calc(env(safe-area-inset-bottom) + 52px));
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: #1f2933;
+    color: white;
+    font-size: 13px;
+    box-shadow: var(--shadow);
+    pointer-events: none;
   }
 
   .status {

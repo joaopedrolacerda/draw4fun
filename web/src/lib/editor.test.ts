@@ -209,7 +209,7 @@ describe('Editor', () => {
       editor.pointerDown(mouse(500, 500));
       editor.pointerUp(mouse(500, 500));
       expect(editor.selectedId).toBeNull();
-      expect(onSelectionChange.mock.calls).toEqual([[r], [null]]);
+      expect(onSelectionChange.mock.calls).toEqual([[[r]], [[]]]);
     });
 
     it('arrastar o selecionado move o elemento', () => {
@@ -239,6 +239,111 @@ describe('Editor', () => {
       editor.select(r);
       editor.tool = 'pencil';
       expect(editor.selectedId).toBeNull();
+    });
+  });
+
+  describe('seleção múltipla', () => {
+    /** Dois retângulos: a em (0,0)-(50,30) e b em (100,0)-(150,30). */
+    function twoRects(): [string, string] {
+      const a = editor.board.addRectangle(0, 0, 50, 30, '#000', 2, 1);
+      const b = editor.board.addRectangle(100, 0, 50, 30, '#000', 2, 1);
+      editor.board.endStep();
+      editor.tool = 'select';
+      return [a, b];
+    }
+
+    it('Shift+clique soma e tira da seleção', () => {
+      const [a, b] = twoRects();
+      editor.pointerDown(mouse(0, 15));
+      editor.pointerUp(mouse(0, 15));
+      editor.pointerDown(mouse(100, 15, { shift: true }));
+      editor.pointerUp(mouse(100, 15, { shift: true }));
+      expect(editor.selectedIds).toEqual([a, b]);
+      expect(editor.selectedId).toBeNull();
+      editor.pointerDown(mouse(0, 15, { shift: true }));
+      editor.pointerUp(mouse(0, 15, { shift: true }));
+      expect(editor.selectedIds).toEqual([b]);
+      expect(editor.selectedId).toBe(b);
+    });
+
+    it('caixa pega só o que fica inteiro dentro dela', () => {
+      const [a, b] = twoRects();
+      editor.pointerDown(mouse(-10, -10));
+      editor.pointerMove(mouse(60, 40));
+      expect(editor.marquee).toEqual({ minX: -10, minY: -10, maxX: 60, maxY: 40 });
+      expect(editor.selectedIds).toEqual([a]);
+      editor.pointerMove(mouse(160, 40));
+      expect(editor.selectedIds).toEqual([a, b]);
+      editor.pointerUp(mouse(160, 40));
+      expect(editor.marquee).toBeNull();
+      expect(editor.selectedIds).toEqual([a, b]);
+    });
+
+    it('caixa com Shift soma à seleção que já havia', () => {
+      const [a, b] = twoRects();
+      editor.select(b);
+      editor.pointerDown(mouse(-10, -10, { shift: true }));
+      editor.pointerMove(mouse(60, 40, { shift: true }));
+      editor.pointerUp(mouse(60, 40, { shift: true }));
+      expect(editor.selectedIds).toEqual([b, a]);
+    });
+
+    it('arrastar um selecionado move todos, num passo só do histórico', () => {
+      const [a, b] = twoRects();
+      editor.setSelection([a, b]);
+      editor.pointerDown(mouse(100, 15));
+      editor.pointerMove(mouse(110, 35));
+      editor.pointerUp(mouse(110, 35));
+      expect(editor.selectedIds).toEqual([a, b]);
+      expect(rectOf(editor.board, a)).toMatchObject({ x: 10, y: 20 });
+      expect(rectOf(editor.board, b)).toMatchObject({ x: 110, y: 20 });
+      editor.undo();
+      expect(rectOf(editor.board, a)).toMatchObject({ x: 0, y: 0 });
+      expect(rectOf(editor.board, b)).toMatchObject({ x: 100, y: 0 });
+    });
+
+    it('redimensionar o grupo estica todos por igual, mantendo as posições relativas', () => {
+      const [a, b] = twoRects();
+      editor.setSelection([a, b]);
+      // Grupo vai de (0,0) a (150,30); a alça sudeste fica perto de (150,30) mais a folga.
+      expect(editor.handleAt(158, 38)).toBe('se');
+      editor.pointerDown(mouse(158, 38));
+      editor.pointerMove(mouse(308, 68));
+      editor.pointerUp(mouse(308, 68));
+      expect(rectOf(editor.board, a)).toMatchObject({ x: 0, y: 0, width: 100, height: 60 });
+      expect(rectOf(editor.board, b)).toMatchObject({ x: 200, y: 0, width: 100, height: 60 });
+    });
+
+    it('apagar, duplicar e copiar valem para todos os selecionados', () => {
+      const [a, b] = twoRects();
+      editor.setSelection([a, b]);
+      const json = editor.copySelection() ?? '';
+      expect(JSON.parse(json).elements).toHaveLength(2);
+      const copies = editor.duplicateSelection();
+      expect(copies).toHaveLength(2);
+      expect(editor.selectedIds).toEqual(copies);
+      expect(editor.deleteSelected()).toBe(true);
+      expect(editor.board.visibleIds()).toEqual([a, b]);
+      expect(editor.selectedIds).toEqual([]);
+    });
+
+    it('Ctrl+A seleciona tudo; desfazer a criação tira da seleção', () => {
+      const [a, b] = twoRects();
+      editor.tool = 'pencil';
+      editor.selectAll();
+      expect(editor.tool).toBe('select');
+      expect(editor.selectedIds).toEqual([a, b]);
+      editor.undo();
+      expect(editor.selectedIds).toEqual([]);
+    });
+
+    it('colar várias coisas deixa todas selecionadas', () => {
+      const [a, b] = twoRects();
+      editor.setSelection([a, b]);
+      const json = editor.copySelection() ?? '';
+      const pasted = editor.paste(json, null);
+      expect(editor.selectedIds).toEqual(pasted);
+      expect(pasted).toHaveLength(2);
     });
   });
 
@@ -341,7 +446,7 @@ describe('Editor', () => {
       expect(Array.from(editor.board.bounds(id) ?? [])).toEqual([300, 250, 500, 350]);
       expect(editor.tool).toBe('select');
       expect(editor.selectedId).toBe(id);
-      expect(onSelectionChange).toHaveBeenCalledWith(id);
+      expect(onSelectionChange).toHaveBeenCalledWith([id]);
       expect(onDocumentChange).toHaveBeenCalled();
     });
 

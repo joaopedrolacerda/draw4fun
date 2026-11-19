@@ -22,6 +22,8 @@ Ordem do projeto: web primeiro, com login Google e sincronização no Drive; dep
 - Texto: a plataforma mede (largura e altura) e grava no elemento; o núcleo usa a medida para clique e limites.
 - Imagens ficam dentro do arquivo, em `files`, como data URL, com chave pelo SHA-256 do conteúdo (a mesma imagem colada duas vezes ocupa espaço uma vez). Imagens com mais de 2048 px ou 1,5 MB são reduzidas antes de entrar.
 - Copiar e colar: a área de transferência recebe um JSON marcado com `"type": "draw4fun/clipboard"`, com os elementos e as imagens que eles usam, então funciona entre abas e entre desenhos. A cópia ganha id novo e mantém a semente (o rabisco sai igual). Ctrl/Cmd+C e X são tratados na tecla (`document.execCommand('copy')`, com a API de área de transferência como plano B), porque o Safari nem sempre dispara `copy` sem texto selecionado.
+- Seleção múltipla: Shift+clique soma ou tira, arrastar no vazio faz a seleção por caixa (entra o que fica inteiro dentro; com Shift, soma), Ctrl/Cmd+A seleciona tudo. Mover, redimensionar (o grupo estica por igual), apagar, duplicar, copiar e copiar como PNG valem para todos. `editor.selectedIds` tem todos; `editor.selectedId` só existe com exatamente um (editar texto).
+- Copiar como PNG (botão na seleção ou Shift+Alt+C): o `Renderer.renderToPng` desenha só os selecionados num canvas à parte (fundo branco, escala 2, margem 16, no máximo 8192 px de lado; contas em `lib/exportImage.ts`) e a imagem vai para a área de transferência como promessa dentro do `ClipboardItem`, ainda no clique, porque o Safari só aceita assim.
 - Desfazer/refazer fica no núcleo (`core/src/history.rs`). Toda operação que muda um elemento chama `record` antes de mudar; o editor chama `endStep` ao fim de cada gesto, então um gesto inteiro vira um passo. Desfazer grava o conteúdo antigo como mudança nova (versão maior), para o merge não confundir com uma cópia velha. Operação nova no `Board` que muda elemento precisa chamar `record`/`record_new`.
 - Drive: escopo `drive.file`, login por redirecionamento no navegador (token de ~1 h no `sessionStorage`, sem servidor). Não use o login por pop-up do Google Identity Services: a política de segurança da página do Google faz a biblioteca avisar "janela fechada" com a janela aberta e o login trava. O ID do cliente vem de `VITE_GOOGLE_CLIENT_ID` em `web/.env.local` (fora do git); sem ele, o Drive fica escondido. Roteiro do Google Cloud no README.
 - Mudança vinda do Drive entra por `editor.mergeRemote` (evento `onRemoteChange`), que não marca o quadro como mudado localmente: senão cada download viraria um novo envio.
@@ -54,7 +56,7 @@ web/src/lib/text    fonte manuscrita (Kalam, empacotada) e medida de texto
 web/src/lib/selection moldura de seleção e alças de redimensionar (editor e renderer usam a mesma conta)
 web/src/lib/camera  câmera do canvas infinito (tela <-> mundo, zoom em torno de um ponto)
 web/src/lib/path    decodifica o caminho achatado que vem do Rust
-web/src/lib/renderer desenha no Canvas 2D, com cache de Path2D por versão do elemento
+web/src/lib/renderer desenha no Canvas 2D, com cache de Path2D por versão do elemento; também exporta selecionados como PNG
 web/src/lib/storage IndexedDB + salvamento automático com atraso + cópia de emergência síncrona ao fechar a aba
 web/src/lib/images  imagens: leitura (upload, colar, arrastar), redução das grandes, chave pelo conteúdo
 web/src/lib/drive/  Google Drive: api (REST v3), auth (login por redirecionamento), sync (motor), controller (quando sincronizar)

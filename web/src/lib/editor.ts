@@ -4,7 +4,7 @@
 
 import type { Board } from './core';
 import { type Camera, type Vec, initialCamera, panBy, screenToWorld, worldToScreen, zoomAt } from './camera';
-import { HANDLES, type Handle, corner, elementRect, opposite, selectionFrame } from './selection';
+import { HANDLES, type Handle, type Rect, containsRect, corner, elementRect, groupFrame, groupRect, opposite, rectFrom } from './selection';
 import { type LoadedImage, placeImage } from './images';
 import { DEFAULT_FONT_SIZE, type TextSize } from './text';
 
@@ -19,7 +19,7 @@ export interface PointerInput {
   /** 0 = principal, 1 = do meio, 2 = direito. */
   button: number;
   pointerType: 'mouse' | 'pen' | 'touch' | string;
-  /** Shift apertado: ao redimensionar, mantém a proporção. */
+  /** Shift apertado: ao redimensionar, mantém a proporção; ao clicar, soma ou tira da seleção. */
   shift?: boolean;
 }
 
@@ -56,17 +56,28 @@ type Gesture =
   | { kind: 'box'; shape: 'rectangle' | 'figure'; pointer: number; id: string; start: Vec; startScreen: Vec }
   | { kind: 'arrow'; pointer: number; id: string; startScreen: Vec }
   | { kind: 'pencil'; pointer: number; id: string }
-  | { kind: 'move'; pointer: number; id: string; last: Vec }
+  | { kind: 'move'; pointer: number; ids: string[]; last: Vec }
+  | {
+      kind: 'marquee';
+      pointer: number;
+      start: Vec;
+      current: Vec;
+      startScreen: Vec;
+      /** Seleção de antes (com Shift, a caixa soma a ela). */
+      base: string[];
+    }
   | { kind: 'erase'; pointer: number; last: Vec }
   | {
       kind: 'resize';
       pointer: number;
-      id: string;
+      /** Limites de cada elemento no começo do gesto. */
+      items: { id: string; rect: Rect }[];
+      /** Limites do conjunto no começo do gesto. */
+      from: Rect;
       /** Canto oposto à alça: fica parado. */
       anchor: Vec;
-      /** Diferença entre o canto do elemento e o ponto onde a alça foi pega. */
+      /** Diferença entre o canto do conjunto e o ponto onde a alça foi pega. */
       grab: Vec;
-      start: { width: number; height: number };
       keepAspect: boolean;
     }
   | { kind: 'pinch'; startDistance: number; startZoom: number; anchor: Vec };
@@ -76,7 +87,7 @@ export interface EditorEvents {
   onDocumentChange?: () => void;
   /** Só a vista mudou (zoom, arrasto): redesenhar, sem salvar. */
   onViewChange?: () => void;
-  onSelectionChange?: (id: string | null) => void;
+  onSelectionChange?: (ids: readonly string[]) => void;
   /** A interface deve abrir a caixa de texto. */
   onTextRequest?: (request: TextRequest) => void;
   /**
@@ -94,7 +105,8 @@ export class Editor {
   spaceHeld = false;
 
   private currentTool: Tool = 'pencil';
-  private selected: string | null = null;
+  /** Selecionados, na ordem em que entraram na seleção. */
+  private selection: string[] = [];
   private gesture: Gesture = { kind: 'idle' };
   private pointers = new Map<number, Vec>();
 
@@ -113,8 +125,20 @@ export class Editor {
     if (tool !== 'select') this.select(null);
   }
 
+  /** Todos os selecionados. */
+  get selectedIds(): readonly string[] {
+    return this.selection;
+  }
+
+  /** O selecionado, quando há exatamente um (para editar texto, por exemplo). */
   get selectedId(): string | null {
-    return this.selected;
+    return this.selection.length === 1 ? (this.selection[0] ?? null) : null;
+  }
+
+  /** Retângulo da seleção por caixa em andamento (no mundo), para o renderer desenhar. */
+  get marquee(): Rect | null {
+    const g = this.gesture;
+    return g.kind === 'marquee' ? rectFrom(g.start, g.current) : null;
   }
 
   get isPanning(): boolean {
@@ -122,9 +146,27 @@ export class Editor {
   }
 
   select(id: string | null): void {
-    if (this.selected === id) return;
-    this.selected = id;
-    this.events.onSelectionChange?.(id);
+    this.setSelection(id ? [id] : []);
+  }
+
+  /** Troca a seleção inteira (repetidos e inexistentes ficam de fora). */
+  setSelection(ids: readonly string[]): void {
+    const visible = new Set(this.board.visibleIds());
+    const next = [...new Set(ids)].filter((id) => visible.has(id));
+    if (next.length === this.selection.length && next.every((id, i) => id === this.selection[i])) return;
+    this.selection = next;
+    this.events.onSelectionChange?.(next);
+  }
+
+  /** Seleciona tudo o que está no quadro (Ctrl/Cmd+A). */
+  selectAll(): void {
+    this.currentTool = 'select';
+    this.setSelection(this.board.visibleIds());
+  }
+
+  /** Tira da seleção o que não existe mais (apagado, desfeito, apagado em outro aparelho). */
+  private pruneSelection(): void {
+    this.setSelection(this.selection);
   }
 
   /** Troca o desenho aberto (por exemplo, ao carregar do armazenamento). */
@@ -136,11 +178,11 @@ export class Editor {
     this.events.onDocumentChange?.();
   }
 
-  /** Apaga o elemento selecionado. Devolve `false` se não havia seleção. */
+  /** Apaga os selecionados. Devolve `false` se não havia seleção. */
   deleteSelected(): boolean {
-    const id = this.selected;
-    if (!id) return false;
-    this.board.remove(id);
+    const ids = this.selection;
+    if (ids.length === 0) return false;
+    for (const id of ids) this.board.remove(id);
     this.select(null);
     this.board.endStep();
     this.events.onDocumentChange?.();
@@ -170,10 +212,10 @@ export class Editor {
     return id;
   }
 
-  /** Alça de redimensionar do selecionado sob o ponto da tela, se houver. */
+  /** Alça de redimensionar da seleção sob o ponto da tela, se houver. */
   handleAt(sx: number, sy: number, pointerType = 'mouse'): Handle | null {
-    if (!this.selected) return null;
-    const frame = selectionFrame(this.board, this.selected, this.camera.zoom);
+    if (this.selection.length === 0) return null;
+    const frame = groupFrame(this.board, this.selection, this.camera.zoom);
     if (!frame) return null;
     const reach = pointerType === 'touch' ? HANDLE_HIT.touch : HANDLE_HIT.mouse;
     for (const h of HANDLES) {
@@ -187,7 +229,7 @@ export class Editor {
   /** Junta uma cópia do desenho vinda de outro aparelho. Lança erro se não conseguir ler. */
   mergeRemote(json: string): void {
     this.board.mergeRemote(json);
-    if (this.selected && !this.board.visibleIds().includes(this.selected)) this.select(null);
+    this.pruneSelection();
     (this.events.onRemoteChange ?? this.events.onDocumentChange)?.();
   }
 
@@ -210,8 +252,8 @@ export class Editor {
 
   private travel(move: () => boolean): boolean {
     if (this.gesture.kind !== 'idle' || !move()) return false;
-    // O selecionado pode ter sumido (desfez a criação dele).
-    if (this.selected && !this.board.visibleIds().includes(this.selected)) this.select(null);
+    // Algum selecionado pode ter sumido (desfez a criação dele).
+    this.pruneSelection();
     this.events.onDocumentChange?.();
     return true;
   }
@@ -221,12 +263,12 @@ export class Editor {
     if (this.board.endStep()) this.events.onDocumentChange?.();
   }
 
-  /** Conteúdo para a área de transferência com o selecionado, ou `null` sem seleção. */
+  /** Conteúdo para a área de transferência com os selecionados, ou `null` sem seleção. */
   copySelection(): string | null {
-    return this.selected ? this.board.copy([this.selected]) : null;
+    return this.selection.length > 0 ? this.board.copy([...this.selection]) : null;
   }
 
-  /** Copia e apaga o selecionado. */
+  /** Copia e apaga os selecionados. */
   cutSelection(): string | null {
     const json = this.copySelection();
     if (json) this.deleteSelected();
@@ -242,9 +284,9 @@ export class Editor {
     return this.afterInsert(this.board.paste(json, at?.x, at?.y));
   }
 
-  /** Duplica o selecionado ao lado do original. */
+  /** Duplica os selecionados ao lado dos originais. */
   duplicateSelection(): string[] {
-    return this.selected ? this.afterInsert(this.board.duplicate([this.selected])) : [];
+    return this.selection.length > 0 ? this.afterInsert(this.board.duplicate([...this.selection])) : [];
   }
 
   /** Cola um texto comum (não do draw4fun) como elemento de texto, começando em `atScreen`. */
@@ -254,12 +296,11 @@ export class Editor {
     return id;
   }
 
-  /** Depois de inserir: seleção com o último inserido, para mover ou redimensionar em seguida. */
+  /** Depois de inserir: seleção com tudo o que entrou, para mover ou redimensionar em seguida. */
   private afterInsert(ids: string[]): string[] {
-    const last = ids.at(-1);
-    if (last) {
+    if (ids.length > 0) {
       this.currentTool = 'select';
-      this.select(last);
+      this.setSelection(ids);
       this.board.endStep();
       this.events.onDocumentChange?.();
     }
@@ -282,7 +323,7 @@ export class Editor {
     if (request.id) {
       if (empty) {
         this.board.remove(request.id);
-        if (this.selected === request.id) this.select(null);
+        this.pruneSelection();
         this.board.endStep();
         this.events.onDocumentChange?.();
         return null;
@@ -305,7 +346,7 @@ export class Editor {
       this.ink.color,
     );
     this.board.endStep();
-        this.events.onDocumentChange?.();
+    this.events.onDocumentChange?.();
     return id;
   }
 
@@ -339,13 +380,28 @@ export class Editor {
     switch (this.currentTool) {
       case 'select': {
         const handle = this.handleAt(p.x, p.y, p.pointerType);
-        if (handle && this.selected) {
-          this.startResize(p, this.selected, handle, w);
+        if (handle) {
+          this.startResize(p, handle, w);
           return;
         }
         const hit = this.board.hitTest(w.x, w.y, HIT_TOLERANCE / this.camera.zoom) ?? null;
-        this.select(hit);
-        if (hit) this.gesture = { kind: 'move', pointer: p.id, id: hit, last: w };
+        if (!hit) {
+          // Lugar vazio: começa a seleção por caixa (com Shift, soma à seleção atual).
+          const base = p.shift ? [...this.selection] : [];
+          this.setSelection(base);
+          this.gesture = { kind: 'marquee', pointer: p.id, start: w, current: w, startScreen: { x: p.x, y: p.y }, base };
+          return;
+        }
+        if (p.shift) {
+          // Shift+clique: tira se já estava, põe se não estava.
+          const has = this.selection.includes(hit);
+          this.setSelection(has ? this.selection.filter((id) => id !== hit) : [...this.selection, hit]);
+          if (has) return;
+        } else if (!this.selection.includes(hit)) {
+          this.select(hit);
+        }
+        // Arrastar qualquer selecionado leva a seleção inteira junto.
+        this.gesture = { kind: 'move', pointer: p.id, ids: [...this.selection], last: w };
         return;
       }
       case 'eraser':
@@ -420,24 +476,48 @@ export class Editor {
       }
       case 'move': {
         const w = screenToWorld(this.camera, p.x, p.y);
-        this.board.translate(g.id, w.x - g.last.x, w.y - g.last.y);
+        for (const id of g.ids) this.board.translate(id, w.x - g.last.x, w.y - g.last.y);
         g.last = w;
         this.events.onDocumentChange?.();
+        return;
+      }
+      case 'marquee': {
+        g.current = screenToWorld(this.camera, p.x, p.y);
+        const area = rectFrom(g.start, g.current);
+        // Entra o que estiver inteiro dentro da caixa.
+        const inside = this.board.visibleIds().filter((id) => {
+          const r = elementRect(this.board, id);
+          return r !== null && containsRect(area, r);
+        });
+        this.setSelection([...g.base, ...inside]);
+        this.events.onViewChange?.();
         return;
       }
       case 'resize': {
         const w = screenToWorld(this.camera, p.x, p.y);
         let dx = w.x + g.grab.x - g.anchor.x;
         let dy = w.y + g.grab.y - g.anchor.y;
-        const { width, height } = g.start;
+        const width = g.from.maxX - g.from.minX;
+        const height = g.from.maxY - g.from.minY;
         if ((g.keepAspect || p.shift) && width > 0 && height > 0) {
           const s = Math.max(Math.abs(dx) / width, Math.abs(dy) / height);
           dx = (dx < 0 ? -1 : 1) * width * s;
           dy = (dy < 0 ? -1 : 1) * height * s;
         }
-        const ax = g.anchor.x;
-        const ay = g.anchor.y;
-        this.board.resize(g.id, Math.min(ax, ax + dx), Math.min(ay, ay + dy), Math.max(ax, ax + dx), Math.max(ay, ay + dy));
+        const to = rectFrom(g.anchor, { x: g.anchor.x + dx, y: g.anchor.y + dy });
+        // Cada elemento é esticado na mesma proporção do conjunto, mantendo a posição relativa.
+        const ratio = (next: number, prev: number) => (prev > 0 ? next / prev : 1);
+        const sx = ratio(to.maxX - to.minX, width);
+        const sy = ratio(to.maxY - to.minY, height);
+        for (const { id, rect: r } of g.items) {
+          this.board.resize(
+            id,
+            to.minX + (r.minX - g.from.minX) * sx,
+            to.minY + (r.minY - g.from.minY) * sy,
+            to.minX + (r.maxX - g.from.minX) * sx,
+            to.minY + (r.maxY - g.from.minY) * sy,
+          );
+        }
         this.events.onDocumentChange?.();
         return;
       }
@@ -510,19 +590,25 @@ export class Editor {
     this.events.onViewChange?.();
   }
 
-  private startResize(p: PointerInput, id: string, handle: Handle, w: Vec): void {
-    const r = elementRect(this.board, id);
-    if (!r) return;
-    const grabbed = corner(r, handle);
+  private startResize(p: PointerInput, handle: Handle, w: Vec): void {
+    const items = this.selection.flatMap((id) => {
+      const rect = elementRect(this.board, id);
+      return rect ? [{ id, rect }] : [];
+    });
+    const from = groupRect(this.board, this.selection);
+    if (!from || items.length === 0) return;
+    const grabbed = corner(from, handle);
+    const only = items.length === 1 ? this.board.kind(items[0]?.id ?? '') : null;
     this.gesture = {
       kind: 'resize',
       pointer: p.id,
-      id,
-      anchor: corner(r, opposite(handle)),
+      items,
+      from,
+      anchor: corner(from, opposite(handle)),
       grab: { x: grabbed.x - w.x, y: grabbed.y - w.y },
-      start: { width: r.maxX - r.minX, height: r.maxY - r.minY },
-      // Texto e imagem só crescem por igual: esticar só para um lado deformaria.
-      keepAspect: this.board.kind(id) === 'text' || this.board.kind(id) === 'image',
+      // Texto e imagem só crescem por igual: esticar só para um lado deformaria. Um grupo
+      // também, para os elementos dele não se deformarem cada um de um jeito.
+      keepAspect: items.length > 1 || only === 'text' || only === 'image',
     };
   }
 
@@ -536,7 +622,7 @@ export class Editor {
     const hit = this.board.hitTest(w.x, w.y, ERASER_RADIUS / this.camera.zoom);
     if (!hit) return;
     this.board.remove(hit);
-    if (this.selected === hit) this.select(null);
+    this.pruneSelection();
     this.events.onDocumentChange?.();
   }
 
