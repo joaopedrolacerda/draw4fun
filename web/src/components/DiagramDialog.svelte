@@ -1,8 +1,8 @@
 <script lang="ts">
   // Janela de diagrama em Mermaid: texto à esquerda, prévia à direita. "Inserir" põe o
-  // desenho no quadro como imagem (veja lib/mermaid.ts).
+  // desenho no quadro como elementos editáveis (padrão) ou como imagem (veja lib/mermaid.ts).
   import type { LoadedImage } from '../lib/images';
-  import { TEMPLATES, renderMermaid } from '../lib/mermaid';
+  import { TEMPLATES, renderMermaid, renderMermaidShapes, type DiagramInsert } from '../lib/mermaid';
 
   let {
     title,
@@ -12,7 +12,7 @@
   }: {
     title: string;
     initialCode: string;
-    onInsert: (image: LoadedImage) => void;
+    onInsert: (result: DiagramInsert) => void;
     onClose: () => void;
   } = $props();
 
@@ -28,6 +28,8 @@
   let error = $state<string | null>(null);
   let loading = $state(true);
   let inserting = $state(false);
+  /** Elementos que dá para editar no quadro, ou uma imagem só (fica igual à prévia). */
+  let mode = $state<'shapes' | 'image'>('shapes');
   let textarea: HTMLTextAreaElement | undefined = $state();
   let generation = 0;
 
@@ -60,8 +62,12 @@
     if (inserting) return;
     inserting = true;
     try {
-      const image = preview && previewCode === code ? preview : await renderMermaid(code);
-      onInsert(image);
+      if (mode === 'shapes') {
+        onInsert({ kind: 'shapes', shapes: await renderMermaidShapes(code) });
+      } else {
+        const image = preview && previewCode === code ? preview : await renderMermaid(code);
+        onInsert({ kind: 'image', image });
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -122,11 +128,19 @@
         {error}
       {:else}
         Sintaxe do <a href="https://mermaid.js.org/intro/syntax-reference.html" target="_blank" rel="noreferrer">Mermaid</a>.
-        O diagrama entra no quadro como imagem: para mudar, edite aqui e insira de novo.
+        {#if mode === 'shapes'}
+          Cada caixa, seta e texto vira um elemento: dá para mover, apagar e editar no quadro.
+        {:else}
+          Entra como uma imagem só, igual à prévia: para mudar, edite aqui e insira de novo.
+        {/if}
       {/if}
     </p>
 
     <div class="actions">
+      <div class="mode" role="radiogroup" aria-label="Inserir como">
+        <label><input type="radio" name="diagram-mode" value="shapes" bind:group={mode} /> Elementos editáveis</label>
+        <label><input type="radio" name="diagram-mode" value="image" bind:group={mode} /> Imagem</label>
+      </div>
       <button class="secondary" onclick={onClose}>Cancelar</button>
       <button class="primary" onclick={insert} disabled={inserting} title="Ctrl+Enter">Inserir</button>
     </div>
@@ -134,6 +148,20 @@
 </div>
 
 <style>
+  .mode {
+    display: flex;
+    gap: 14px;
+    margin-right: auto;
+    font-size: 13px;
+  }
+
+  .mode label {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    cursor: pointer;
+  }
+
   .backdrop {
     position: absolute;
     inset: 0;

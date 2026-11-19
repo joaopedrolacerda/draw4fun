@@ -97,7 +97,7 @@ pub fn bounds(element: &Element) -> Option<Bounds> {
             max_x: x + width,
             max_y: y + height,
         }),
-        Shape::Arrow { points } => {
+        Shape::Arrow { points, .. } => {
             let [x, y] = *points.first()?;
             let init = Bounds::from_corners(x, y, x, y);
             Some(points.iter().fold(init, |b, p| Bounds {
@@ -155,7 +155,7 @@ pub fn hit(element: &Element, x: f64, y: f64, tolerance: f64) -> bool {
         Shape::Image { .. } => true,
         // Boneco é fininho demais para mirar no traço: responde na caixa toda.
         Shape::Figure { .. } => true,
-        Shape::Arrow { points } => points
+        Shape::Arrow { points, .. } => points
             .windows(2)
             .any(|w| distance_to_segment(x, y, w[0][0], w[0][1], w[1][0], w[1][1]) <= slack),
     }
@@ -260,6 +260,7 @@ mod tests {
     fn seta_responde_perto_da_linha_e_tem_limites_dos_dois_pontos() {
         let e = element(Shape::Arrow {
             points: vec![[100.0, 0.0], [0.0, 100.0]],
+            head: true,
         });
         assert_eq!(
             bounds(&e),
@@ -273,6 +274,7 @@ mod tests {
     fn seta_com_dobra_responde_em_cada_trecho() {
         let e = element(Shape::Arrow {
             points: vec![[0.0, 0.0], [0.0, 50.0], [100.0, 50.0]],
+            head: true,
         });
         assert_eq!(
             bounds(&e),

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isClipboard, newBoard, type Board } from './core';
 import { Editor, type PointerInput } from './editor';
+import type { DiagramShape } from './diagramShapes';
 
 const mouse = (x: number, y: number, extra: Partial<PointerInput> = {}): PointerInput => ({
   id: 1,
@@ -250,6 +251,45 @@ describe('Editor', () => {
       editor.select(r);
       editor.tool = 'pencil';
       expect(editor.selectedId).toBeNull();
+    });
+  });
+
+  describe('diagrama como elementos', () => {
+    const measure = (text: string, fontSize: number) => ({ width: text.length * fontSize * 0.5, height: fontSize * 1.25 });
+    const shapes: DiagramShape[] = [
+      { kind: 'text', text: 'Início', cx: 50, cy: 20, fontSize: 16 },
+      { kind: 'line', points: [[50, 40], [50, 100]], head: true },
+      { kind: 'rect', x: 0, y: 0, width: 100, height: 40 },
+      { kind: 'line', points: [[0, 140], [50, 110], [100, 140], [50, 170], [0, 140]], head: false },
+    ];
+
+    it('entra como peças separadas, num passo só do desfazer, já selecionadas', () => {
+      const ids = editor.insertDiagram(shapes, { x: 400, y: 300 }, { width: 800, height: 600 }, measure);
+      expect(ids).toHaveLength(4);
+      expect(ids.map((id) => editor.board.kind(id))).toEqual(['rectangle', 'arrow', 'arrow', 'text']);
+      expect(editor.selectedIds).toEqual(ids);
+      expect(editor.board.text(ids[3]!)).toBe('Início');
+      editor.undo();
+      expect(editor.board.visibleIds()).toEqual([]);
+    });
+
+    it('fica centrado na tela, no tamanho original quando cabe', () => {
+      const ids = editor.insertDiagram(shapes, { x: 400, y: 300 }, { width: 800, height: 600 }, measure);
+      const doc = JSON.parse(editor.board.toJson());
+      const rect = doc.elements.find((e: { id: string }) => e.id === ids[0]);
+      // Diagrama de 100 x 170: o canto vai para (400 - 50, 300 - 85).
+      expect(rect).toMatchObject({ x: 350, y: 215, width: 100, height: 40 });
+      const diamond = doc.elements.find((e: { id: string }) => e.id === ids[2]);
+      expect(diamond.head).toBe(false);
+      const text = doc.elements.find((e: { id: string }) => e.id === ids[3]);
+      expect(text.fontSize).toBe(16);
+      expect(text.x + text.width / 2).toBeCloseTo(400);
+    });
+
+    it('diminui para caber na tela', () => {
+      const ids = editor.insertDiagram(shapes, { x: 100, y: 100 }, { width: 200, height: 200 }, measure, 0.5);
+      const rect = JSON.parse(editor.board.toJson()).elements.find((e: { id: string }) => e.id === ids[0]);
+      expect(rect.height).toBeCloseTo((40 * 100) / 170);
     });
   });
 

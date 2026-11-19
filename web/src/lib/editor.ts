@@ -7,6 +7,7 @@ import { type Camera, type Vec, initialCamera, panBy, screenToWorld, worldToScre
 import { HANDLES, type Handle, type Rect, containsRect, corner, cursorFor, elementRect, groupFrame, groupRect, opposite, rectFrom } from './selection';
 import { type LoadedImage, placeImage } from './images';
 import { DEFAULT_FONT_SIZE, type TextSize } from './text';
+import { type DiagramShape, layerOrder, shapesBounds, transformShape } from './diagramShapes';
 
 export type Tool = 'select' | 'hand' | 'rectangle' | 'arrow' | 'figure' | 'pencil' | 'text' | 'eraser';
 
@@ -343,6 +344,42 @@ export class Editor {
     const id = this.commitText({ world: screenToWorld(this.camera, atScreen.x, atScreen.y) }, text, size);
     if (id) this.afterInsert([id]);
     return id;
+  }
+
+  /**
+   * Põe um diagrama no quadro como elementos (caixas, linhas, setas e textos), no centro
+   * da tela, cabendo em `fraction` dela. Tudo entra num passo só do desfazer e já
+   * selecionado, para mover junto; depois, cada peça se edita sozinha.
+   * `measure` mede o texto na fonte do quadro.
+   */
+  insertDiagram(
+    shapes: readonly DiagramShape[],
+    centerScreen: Vec,
+    viewport: { width: number; height: number },
+    measure: (text: string, fontSize: number) => TextSize,
+    fraction = 0.8,
+  ): string[] {
+    const bounds = shapesBounds(shapes, (t) => measure(t.text, t.fontSize));
+    if (!bounds) return [];
+    const width = Math.max(1, bounds.maxX - bounds.minX);
+    const height = Math.max(1, bounds.maxY - bounds.minY);
+    const scale = Math.min(1, (viewport.width * fraction) / this.camera.zoom / width, (viewport.height * fraction) / this.camera.zoom / height);
+    const c = screenToWorld(this.camera, centerScreen.x, centerScreen.y);
+    const offset: [number, number] = [c.x - (width * scale) / 2, c.y - (height * scale) / 2];
+    const { color, width: stroke, roughness } = this.ink;
+    const ids: string[] = [];
+    for (const raw of layerOrder(shapes)) {
+      const s = transformShape(raw, [bounds.minX, bounds.minY], scale, offset);
+      if (s.kind === 'rect') {
+        ids.push(this.board.addRectangle(s.x, s.y, s.width, s.height, color, stroke, roughness));
+      } else if (s.kind === 'line') {
+        ids.push(this.board.addPolyline(new Float64Array(s.points.flat()), s.head, color, stroke, roughness));
+      } else {
+        const size = measure(s.text, s.fontSize);
+        ids.push(this.board.addText(s.cx - size.width / 2, s.cy - size.height / 2, s.text, s.fontSize, size.width, size.height, color));
+      }
+    }
+    return this.afterInsert(ids);
   }
 
   /** Depois de inserir: seleção com tudo o que entrou, para mover ou redimensionar em seguida. */

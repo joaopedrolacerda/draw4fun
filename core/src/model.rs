@@ -10,6 +10,14 @@ use crate::error::CoreError;
 /// versões antigas não saibam ler, e escreva a migração em [`Document::from_json`].
 pub const SCHEMA_VERSION: u32 = 1;
 
+fn yes() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
 fn default_pressure() -> f64 {
     0.5
 }
@@ -96,9 +104,12 @@ pub enum Shape {
         file_id: String,
     },
     /// Seta: linha que passa pelos pontos em ordem, com a ponta no último. Duas pontas é
-    /// uma seta reta; mais pontos fazem dobras.
+    /// uma seta reta; mais pontos fazem dobras. Sem `head`, é só a linha (por exemplo, a
+    /// borda de um losango vindo de um diagrama).
     Arrow {
         points: Vec<[f64; 2]>,
+        #[serde(default = "yes", skip_serializing_if = "is_true")]
+        head: bool,
     },
     /// Boneco de palitinho dentro da caixa: cabeça redonda em cima, braços e pernas.
     Figure {
@@ -126,7 +137,7 @@ impl Shape {
                     p.y += dy;
                 }
             }
-            Shape::Arrow { points } => {
+            Shape::Arrow { points, .. } => {
                 for p in points {
                     p[0] += dx;
                     p[1] += dy;

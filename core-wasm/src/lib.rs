@@ -126,6 +126,21 @@ impl Board {
     }
 
     /// Move a ponta da seta.
+    /// Linha por vários pontos (`[x0, y0, x1, y1, ...]`), com ou sem ponta de seta no fim.
+    #[wasm_bindgen(js_name = addPolyline)]
+    pub fn add_polyline(
+        &mut self,
+        coords: Vec<f64>,
+        head: bool,
+        color: String,
+        width: f64,
+        roughness: f64,
+    ) -> String {
+        let points = coords.as_chunks::<2>().0.to_vec();
+        self.inner
+            .add_polyline(points, head, style(color, width, roughness))
+    }
+
     #[wasm_bindgen(js_name = setArrowEnd)]
     pub fn set_arrow_end(&mut self, id: &str, x: f64, y: f64) -> Result<(), JsError> {
         self.inner.set_arrow_end(id, x, y).map_err(js_err)

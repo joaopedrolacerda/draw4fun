@@ -152,18 +152,23 @@ impl Board {
 
     /// Seta passando pelos pontos, com a ponta no último (pelo menos dois pontos;
     /// com menos, o começo vira a ponta também).
-    pub fn add_arrow(&mut self, mut points: Vec<[f64; 2]>, style: Style) -> String {
+    pub fn add_arrow(&mut self, points: Vec<[f64; 2]>, style: Style) -> String {
+        self.add_polyline(points, true, style)
+    }
+
+    /// Linha pelos pontos, com ou sem ponta de seta no último.
+    pub fn add_polyline(&mut self, mut points: Vec<[f64; 2]>, head: bool, style: Style) -> String {
         while points.len() < 2 {
             points.push(points.last().copied().unwrap_or([0.0, 0.0]));
         }
-        self.insert(style, Shape::Arrow { points })
+        self.insert(style, Shape::Arrow { points, head })
     }
 
     /// Move a ponta da seta (o começo fica onde está).
     pub fn set_arrow_end(&mut self, id: &str, nx: f64, ny: f64) -> Result<(), CoreError> {
         self.record(id);
         let el = self.element_mut(id)?;
-        let Shape::Arrow { points } = &mut el.shape else {
+        let Shape::Arrow { points, .. } = &mut el.shape else {
             return Err(CoreError::WrongKind(id.into()));
         };
         if let Some(last) = points.last_mut() {
@@ -359,7 +364,7 @@ impl Board {
             } => {
                 (*x, *y, *width, *height) = (to.min_x, to.min_y, to.width(), to.height());
             }
-            Shape::Arrow { points } => {
+            Shape::Arrow { points, .. } => {
                 for p in points {
                     p[0] = to.min_x + (p[0] - from.min_x) * sx;
                     p[1] = to.min_y + (p[1] - from.min_y) * sy;
@@ -746,7 +751,8 @@ mod tests {
         assert_eq!(
             board.get(&id).map(|e| e.shape.clone()),
             Some(Shape::Arrow {
-                points: vec![[0.0, 0.0], [80.0, -40.0]]
+                points: vec![[0.0, 0.0], [80.0, -40.0]],
+                head: true,
             })
         );
         let r = board.add_rectangle(0.0, 0.0, 1.0, 1.0, Style::default());
@@ -821,5 +827,28 @@ mod tests {
     fn arquivo_sem_fundo_continua_sem_o_campo() {
         let board = Board::new(7);
         assert!(!board.to_json().unwrap().contains("background"));
+    }
+
+    #[test]
+    fn linha_sem_ponta_grava_o_campo_e_seta_antiga_continua_com_ponta() {
+        let mut board = Board::new(3);
+        let line = board.add_polyline(
+            vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+            false,
+            Style::default(),
+        );
+        let arrow = board.add_arrow(vec![[0.0, 0.0], [5.0, 5.0]], Style::default());
+        let json = board.to_json().unwrap();
+        assert_eq!(json.matches("\"head\":false").count(), 1);
+        assert!(!json.contains("\"head\":true"));
+        let again = Board::from_json(&json, 1).unwrap();
+        assert!(matches!(
+            again.get(&line).map(|e| &e.shape),
+            Some(Shape::Arrow { head: false, .. })
+        ));
+        assert!(matches!(
+            again.get(&arrow).map(|e| &e.shape),
+            Some(Shape::Arrow { head: true, .. })
+        ));
     }
 }

@@ -14,7 +14,7 @@
   import { BACKGROUNDS, DEFAULT_BACKGROUND, displayInk, isDark, resolveBackground } from './lib/background';
   import { DEFAULT_EXPORT } from './lib/exportImage';
   import { ACCEPTED_TYPES, loadImageFile, pickImageFiles, type LoadedImage } from './lib/images';
-  import { BLANK_DIAGRAM, TEMPLATES } from './lib/mermaid';
+  import { BLANK_DIAGRAM, TEMPLATES, type DiagramInsert } from './lib/mermaid';
   import { Autosaver, EmergencyBackup, IndexedDbStore, type SaveStatus } from './lib/storage';
   import { DEFAULT_FONT_SIZE, FONT_FAMILY, LINE_HEIGHT, fontString, measureText, type TextSize } from './lib/text';
 
@@ -114,9 +114,10 @@
   }
 
   /** Põe o diagrama no centro da tela, já selecionado para mover ou redimensionar. */
-  function insertDiagram(image: LoadedImage): void {
+  function insertDiagram(result: DiagramInsert): void {
     if (!editor) return;
-    editor.insertImage(image, center(), view, 0.8);
+    if (result.kind === 'shapes') editor.insertDiagram(result.shapes, center(), viewport(), measure, 0.8);
+    else editor.insertImage(result.image, center(), viewport(), 0.8);
     tool = 'select';
     diagram = null;
     requestDraw();
@@ -164,8 +165,22 @@
     });
   }
 
+  /**
+   * Tamanho da tela. O `ResizeObserver` atualiza `view`, mas numa aba aberta em segundo
+   * plano ele pode demorar a avisar: aí mede na hora, para nada ser posto com tamanho zero.
+   */
+  function viewport() {
+    if ((view.width === 0 || view.height === 0) && canvas) {
+      const rect = canvas.getBoundingClientRect();
+      view.width = rect.width;
+      view.height = rect.height;
+    }
+    return view;
+  }
+
   function center() {
-    return { x: view.width / 2, y: view.height / 2 };
+    const v = viewport();
+    return { x: v.width / 2, y: v.height / 2 };
   }
 
   function selectTool(next: Tool): void {
@@ -229,7 +244,7 @@
       try {
         const image = await loadImageFile(file);
         tool = 'select';
-        editor.insertImage(image, { x: at.x + i * 24, y: at.y + i * 24 }, view);
+        editor.insertImage(image, { x: at.x + i * 24, y: at.y + i * 24 }, viewport());
       } catch (err) {
         console.error(err);
         notice = err instanceof Error ? err.message : 'Não foi possível abrir a imagem.';

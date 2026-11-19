@@ -94,9 +94,9 @@ pub fn render(element: &Element) -> RenderPath {
             mode: PaintMode::Image,
             commands: Vec::new(),
         },
-        Shape::Arrow { points } => RenderPath {
+        Shape::Arrow { points, head } => RenderPath {
             mode: PaintMode::Stroke,
-            commands: arrow(&mut rng, points, element.style.roughness),
+            commands: arrow(&mut rng, points, *head, element.style.roughness),
         },
         Shape::Figure {
             x,
@@ -117,7 +117,7 @@ const ARROW_HEAD_MAX: f64 = 18.0;
 
 /// Haste rabiscada (um trecho por par de pontos) mais duas abas curtas na ponta,
 /// alinhadas com o último trecho.
-fn arrow(rng: &mut Rng, points: &[[f64; 2]], roughness: f64) -> Vec<PathCmd> {
+fn arrow(rng: &mut Rng, points: &[[f64; 2]], with_head: bool, roughness: f64) -> Vec<PathCmd> {
     let mut out = Vec::with_capacity(8 * points.len());
     for w in points.windows(2) {
         sketchy_line(
@@ -128,7 +128,7 @@ fn arrow(rng: &mut Rng, points: &[[f64; 2]], roughness: f64) -> Vec<PathCmd> {
             &mut out,
         );
     }
-    let Some(&[bx, by]) = points.last() else {
+    let Some(&[bx, by]) = points.last().filter(|_| with_head) else {
         return out;
     };
     let b = (bx, by);
@@ -537,6 +537,7 @@ mod tests {
         let path = render(&element(
             Shape::Arrow {
                 points: vec![[0.0, 0.0], [100.0, 0.0]],
+                head: true,
             },
             0.0,
         ));
@@ -554,6 +555,7 @@ mod tests {
         let path = render(&element(
             Shape::Arrow {
                 points: vec![[0.0, 0.0], [0.0, 50.0], [100.0, 50.0], [100.0, 50.0]],
+                head: true,
             },
             0.0,
         ));
@@ -561,6 +563,18 @@ mod tests {
         // Três trechos (o último tem comprimento zero) e as abas voltando para a esquerda.
         assert_eq!(pts.len(), 3 * 2 + 4);
         assert!(pts[7].0 < 100.0 && pts[9].0 < 100.0);
+    }
+
+    #[test]
+    fn linha_sem_ponta_so_tem_os_trechos() {
+        let path = render(&element(
+            Shape::Arrow {
+                points: vec![[0.0, 0.0], [50.0, 0.0], [50.0, 50.0]],
+                head: false,
+            },
+            0.0,
+        ));
+        assert_eq!(ends(&path).len(), 2 * 2);
     }
 
     #[test]

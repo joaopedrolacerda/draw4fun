@@ -12,9 +12,12 @@ Veja `CLAUDE.md` para a estrutura, as regras e os comandos.
 ## Diagramas (Mermaid)
 O botão de diagrama na barra abre um menu: escrever em [Mermaid](https://mermaid.js.org/intro/syntax-reference.html)
 do zero ou partir de um modelo (fluxograma, sequência, classes, estados ou entidade-relacionamento).
-A janela mostra a prévia enquanto você digita; "Inserir" (ou Ctrl+Enter) põe o diagrama no quadro
-como imagem, com traço de esboço e a mesma letra do quadro. Para mudar um diagrama, edite o código
-e insira de novo.
+A janela mostra a prévia enquanto você digita; "Inserir" (ou Ctrl+Enter) põe o diagrama no quadro.
+Por padrão ele entra como **elementos editáveis**: cada caixa, linha, seta e texto vira um desenho
+do quadro, que dá para mover, apagar, redimensionar e editar (clique duplo no texto). Tudo entra
+selecionado, para mover junto, e num passo só do desfazer. A opção "Imagem" põe o diagrama como uma
+imagem só, igual à prévia. Na conversão, linhas tracejadas viram contínuas e os símbolos de ponta
+que não são seta (losango das classes, "pé de galinha" do ER) viram linha simples.
 
 ## Deploy (Railway)
 O `Dockerfile` da raiz gera a imagem de produção em três etapas: compila o núcleo para WASM

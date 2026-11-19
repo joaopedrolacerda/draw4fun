@@ -1,12 +1,16 @@
 // Diagramas em Mermaid: o texto vira um SVG (com a biblioteca oficial do Mermaid) e entra
-// no quadro como imagem. A biblioteca é grande, então só é baixada na primeira vez que
-// alguém abre a janela de diagrama.
+// no quadro como elementos editáveis (veja lib/diagramShapes.ts) ou como imagem. A
+// biblioteca é grande, então só é baixada na primeira vez que alguém abre a janela.
 //
 // O SVG leva a fonte Kalam embutida: desenhado como imagem, ele não enxerga as fontes da
 // página, e sem isso o texto sairia numa fonte diferente da que o Mermaid usou para medir.
 
 import kalamUrl from '@fontsource/kalam/files/kalam-latin-400-normal.woff2?url';
 import { type LoadedImage, fileIdFor } from './images';
+import { type DiagramShape, extractShapes } from './diagramShapes';
+
+/** O que a janela de diagrama manda para o quadro. */
+export type DiagramInsert = { kind: 'shapes'; shapes: DiagramShape[] } | { kind: 'image'; image: LoadedImage };
 
 export interface DiagramTemplate {
   id: string;
@@ -161,22 +165,55 @@ let api: Promise<MermaidApi> | null = null;
 let fontCss: Promise<string> | null = null;
 let counter = 0;
 
+/**
+ * `handDrawn` para a imagem (o próprio Mermaid rabisca); `classic` para virar elementos,
+ * porque aí quem rabisca é o draw4fun, e o traço limpo é mais fácil de ler.
+ */
+type Look = 'handDrawn' | 'classic';
+
 function loadMermaid(): Promise<MermaidApi> {
-  api ??= import('mermaid').then(({ default: mermaid }) => {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: 'neutral',
-      look: 'handDrawn',
-      handDrawnSeed: 1,
-      fontFamily: `${DIAGRAM_FONT}, cursive`,
-      // Texto como SVG puro: rótulos em HTML (foreignObject) não aparecem quando o SVG é imagem.
-      htmlLabels: false,
-    });
-    return mermaid;
-  });
+  api ??= import('mermaid').then(({ default: mermaid }) => mermaid);
   api.catch(() => (api = null));
   return api;
+}
+
+function configure(mermaid: MermaidApi, look: Look): void {
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'neutral',
+    look,
+    handDrawnSeed: 1,
+    fontFamily: `${DIAGRAM_FONT}, cursive`,
+    // Texto como SVG puro: rótulos em HTML (foreignObject) não aparecem quando o SVG é imagem
+    // e não dão para ler como texto ao virar elementos.
+    htmlLabels: false,
+  });
+}
+
+/** A configuração do Mermaid é global: um desenho por vez, cada um com o seu visual. */
+let queue: Promise<unknown> = Promise.resolve();
+
+async function renderSvg(code: string, look: Look): Promise<string> {
+  if (code.trim().length === 0) throw new Error('Escreva o diagrama primeiro.');
+  const mermaid = await loadMermaid();
+  await document.fonts?.load(`16px ${DIAGRAM_FONT}`);
+  const run = queue.then(async () => {
+    const id = `draw4fun-mermaid-${++counter}`;
+    try {
+      configure(mermaid, look);
+      await mermaid.parse(code);
+      return (await mermaid.render(id, code)).svg;
+    } catch (err) {
+      throw new Error(describeError(err), { cause: err });
+    } finally {
+      // Em caso de erro o Mermaid pode deixar o rascunho do desenho na página.
+      document.getElementById(id)?.remove();
+      document.getElementById(`d${id}`)?.remove();
+    }
+  });
+  queue = run.catch(() => undefined);
+  return run;
 }
 
 function loadFontCss(): Promise<string> {
@@ -204,20 +241,31 @@ function loadFontCss(): Promise<string> {
  * Lança erro com mensagem em português se o texto não puder ser desenhado.
  */
 export async function renderMermaid(code: string): Promise<LoadedImage> {
-  if (code.trim().length === 0) throw new Error('Escreva o diagrama primeiro.');
-  const [mermaid, css] = await Promise.all([loadMermaid(), loadFontCss(), document.fonts?.load(`16px ${DIAGRAM_FONT}`)]);
-  const id = `draw4fun-mermaid-${++counter}`;
+  const [svg, css] = await Promise.all([renderSvg(code, 'handDrawn'), loadFontCss()]);
+  const ready = prepareSvg(svg, css);
+  const dataUrl = svgDataUrl(ready.svg);
+  return { fileId: await fileIdFor(dataUrl), mimeType: 'image/svg+xml', dataUrl, width: ready.width, height: ready.height };
+}
+
+/**
+ * Desenha o texto em Mermaid e devolve as formas (caixas, linhas, setas, textos) para
+ * entrarem no quadro como elementos editáveis, nas coordenadas do desenho do Mermaid.
+ */
+export async function renderMermaidShapes(code: string): Promise<DiagramShape[]> {
+  const ready = prepareSvg(await renderSvg(code, 'classic'), '');
+  // Medir caminhos e textos exige o SVG na página: fica fora da tela e transparente (com `visibility: hidden` a leitura acharia tudo escondido).
+  const host = document.createElement('div');
+  host.setAttribute('aria-hidden', 'true');
+  host.style.cssText = 'position:fixed;left:-100000px;top:0;opacity:0;pointer-events:none;';
+  host.innerHTML = ready.svg;
+  document.body.append(host);
   try {
-    await mermaid.parse(code);
-    const { svg } = await mermaid.render(id, code);
-    const ready = prepareSvg(svg, css);
-    const dataUrl = svgDataUrl(ready.svg);
-    return { fileId: await fileIdFor(dataUrl), mimeType: 'image/svg+xml', dataUrl, width: ready.width, height: ready.height };
-  } catch (err) {
-    throw new Error(describeError(err), { cause: err });
+    const svg = host.querySelector('svg');
+    if (!svg) throw new Error('O Mermaid devolveu um desenho vazio.');
+    const shapes = extractShapes(svg);
+    if (shapes.length === 0) throw new Error('Esse diagrama não tem nada para desenhar.');
+    return shapes;
   } finally {
-    // Em caso de erro o Mermaid pode deixar o rascunho do desenho na página.
-    document.getElementById(id)?.remove();
-    document.getElementById(`d${id}`)?.remove();
+    host.remove();
   }
 }
