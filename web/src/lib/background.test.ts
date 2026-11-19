@@ -49,13 +49,18 @@ describe('fundo do quadro', () => {
     expect(gridDotColor(AMARELO)).not.toContain('255');
   });
 
-  it('amarelo é bem clarinho', () => {
-    expect(luminance(AMARELO)!).toBeGreaterThan(0.9);
+  it('amarelo é um branco quente, de luz noturna: claro, com menos azul', () => {
+    expect(luminance(AMARELO)!).toBeGreaterThan(0.8);
+    const [r, , b] = [1, 3, 5].map((i) => parseInt(AMARELO.slice(i, i + 2), 16));
+    // Mais quente que o branco (#fbfaf7, diferença de 4), sem virar amarelo.
+    expect(r! - b!).toBeGreaterThan(10);
+    expect(r! - b!).toBeLessThan(30);
   });
 
   it('quadro salvo com o amarelo antigo passa a usar o novo', () => {
     expect(resolveBackground('#fdf0a6')).toBe(AMARELO);
     expect(resolveBackground('#FDF0A6')).toBe(AMARELO);
+    expect(resolveBackground('#fff8d4')).toBe(AMARELO);
     expect(resolveBackground(PRETO)).toBe(PRETO);
     expect(resolveBackground(undefined)).toBe(DEFAULT_BACKGROUND);
   });
