@@ -11,7 +11,7 @@
   import { boardFromJson, isClipboard, loadCore, newBoard } from './lib/core';
   import { Editor, INK_COLORS, type PointerInput, type TextRequest, type Tool } from './lib/editor';
   import { Renderer } from './lib/renderer';
-  import { BACKGROUNDS, DEFAULT_BACKGROUND, displayInk, isDark } from './lib/background';
+  import { BACKGROUNDS, DEFAULT_BACKGROUND, displayInk, isDark, resolveBackground } from './lib/background';
   import { DEFAULT_EXPORT } from './lib/exportImage';
   import { ACCEPTED_TYPES, loadImageFile, pickImageFiles, type LoadedImage } from './lib/images';
   import { BLANK_DIAGRAM, TEMPLATES } from './lib/mermaid';
@@ -139,7 +139,7 @@
   }
 
   function syncBackground(): void {
-    background = editor?.background ?? DEFAULT_BACKGROUND;
+    background = resolveBackground(editor?.background);
   }
 
   function onWindowPointerDown(e: PointerEvent): void {

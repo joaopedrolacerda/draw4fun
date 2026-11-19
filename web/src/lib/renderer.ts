@@ -7,7 +7,7 @@ import { decodePath, type PaintMode } from './path';
 import { HANDLES, HANDLE_SIZE, type Rect, corner, groupFrame, selectionFrame } from './selection';
 import { LINE_HEIGHT, fontString, lines } from './text';
 import { DEFAULT_EXPORT, type ExportOptions, exportFrame } from './exportImage';
-import { DEFAULT_BACKGROUND, displayInk, gridDotColor } from './background';
+import { DEFAULT_BACKGROUND, displayInk, gridDotColor, resolveBackground } from './background';
 
 interface Cached {
   version: number;
@@ -48,7 +48,7 @@ export class Renderer {
     dpr: number,
     options: DrawOptions = {},
   ): void {
-    const background = board.background() ?? DEFAULT_BACKGROUND;
+    const background = resolveBackground(board.background());
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, width, height);

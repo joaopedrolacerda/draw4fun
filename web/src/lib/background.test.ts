@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BACKGROUNDS, DEFAULT_BACKGROUND, displayInk, gridDotColor, isDark, luminance } from './background';
+import { BACKGROUNDS, DEFAULT_BACKGROUND, displayInk, gridDotColor, isDark, luminance, resolveBackground } from './background';
 import { INK_COLORS } from './editor';
 
 const PRETO = BACKGROUNDS.find((b) => b.label === 'Preto')!.color;
@@ -47,5 +47,16 @@ describe('fundo do quadro', () => {
   it('pontinhos da grade claros no preto e escuros no resto', () => {
     expect(gridDotColor(PRETO)).toContain('255');
     expect(gridDotColor(AMARELO)).not.toContain('255');
+  });
+
+  it('amarelo é bem clarinho', () => {
+    expect(luminance(AMARELO)!).toBeGreaterThan(0.9);
+  });
+
+  it('quadro salvo com o amarelo antigo passa a usar o novo', () => {
+    expect(resolveBackground('#fdf0a6')).toBe(AMARELO);
+    expect(resolveBackground('#FDF0A6')).toBe(AMARELO);
+    expect(resolveBackground(PRETO)).toBe(PRETO);
+    expect(resolveBackground(undefined)).toBe(DEFAULT_BACKGROUND);
   });
 });

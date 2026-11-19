@@ -12,10 +12,21 @@ export interface BackgroundChoice {
 export const BACKGROUNDS: readonly BackgroundChoice[] = [
   { label: 'Branco', color: '#fbfaf7' },
   { label: 'Preto', color: '#1c1c1e' },
-  { label: 'Amarelo', color: '#fdf0a6' },
+  { label: 'Amarelo', color: '#fff8d4' },
 ];
 
 export const DEFAULT_BACKGROUND = BACKGROUNDS[0]!.color;
+
+/** Cores que já foram opção e mudaram: quadros salvos com elas usam a nova. */
+const RENAMED: Readonly<Record<string, string>> = {
+  '#fdf0a6': '#fff8d4', // amarelo da primeira versão, forte demais
+};
+
+/** Cor de fundo a usar para o valor guardado no quadro (ou o padrão, sem valor). */
+export function resolveBackground(stored: string | null | undefined): string {
+  if (!stored) return DEFAULT_BACKGROUND;
+  return RENAMED[stored.toLowerCase()] ?? stored;
+}
 
 /** Tinta clara usada no lugar da escura quando o fundo é escuro. */
 const LIGHT_INK = '#f4f2ec';
