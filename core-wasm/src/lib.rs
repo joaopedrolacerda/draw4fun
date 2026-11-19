@@ -339,6 +339,17 @@ impl Board {
         self.inner.get(id).map(|e| e.version)
     }
 
+    /// Cor de fundo do quadro, ou `undefined` para o padrão.
+    pub fn background(&self) -> Option<String> {
+        self.inner.background().map(str::to_string)
+    }
+
+    /// Troca a cor de fundo; `false` se já era essa.
+    #[wasm_bindgen(js_name = setBackground)]
+    pub fn set_background(&mut self, color: &str) -> bool {
+        self.inner.set_background(color)
+    }
+
     #[wasm_bindgen(js_name = strokeColor)]
     pub fn stroke_color(&self, id: &str) -> Option<String> {
         self.inner.get(id).map(|e| e.style.stroke_color.clone())

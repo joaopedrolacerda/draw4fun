@@ -39,6 +39,17 @@ describe('Editor', () => {
 
   afterEach(() => editor.board.free());
 
+  it('fundo: trocar avisa para salvar, fica no arquivo e não entra no desfazer', () => {
+    expect(editor.background).toBeUndefined();
+    editor.setBackground('#1c1c1e');
+    expect(editor.background).toBe('#1c1c1e');
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    editor.setBackground('#1c1c1e');
+    expect(onDocumentChange).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(editor.board.toJson()).background.color).toBe('#1c1c1e');
+    expect(editor.canUndo).toBe(false);
+  });
+
   it('retângulo: arrastar cria e solta mantém', () => {
     editor.tool = 'rectangle';
     editor.pointerDown(mouse(10, 10));

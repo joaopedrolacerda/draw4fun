@@ -159,6 +159,16 @@ export class Editor {
   }
 
   /** Seleciona tudo o que está no quadro (Ctrl/Cmd+A). */
+  /** Cor de fundo do quadro, ou `undefined` para o padrão. */
+  get background(): string | undefined {
+    return this.board.background();
+  }
+
+  /** Troca a cor de fundo. Vai para o arquivo e para o Drive, mas não para o desfazer. */
+  setBackground(color: string): void {
+    if (this.board.setBackground(color)) this.events.onDocumentChange?.();
+  }
+
   selectAll(): void {
     this.currentTool = 'select';
     this.setSelection(this.board.visibleIds());

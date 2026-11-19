@@ -175,6 +175,17 @@ pub struct Document {
     /// Conteúdo das imagens, pela chave que os elementos `image` usam.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub files: BTreeMap<String, ImageFile>,
+    /// Cor de fundo do quadro. Sem ela, o fundo claro padrão.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<Background>,
+}
+
+/// Cor de fundo, com `version` e `nonce` para o merge decidir como faz com os elementos.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Background {
+    pub color: String,
+    pub version: u32,
+    pub nonce: u32,
 }
 
 /// Uma imagem guardada dentro do arquivo, como data URL (`data:image/png;base64,...`).
@@ -191,6 +202,7 @@ impl Default for Document {
             schema_version: SCHEMA_VERSION,
             elements: Vec::new(),
             files: BTreeMap::new(),
+            background: None,
         }
     }
 }

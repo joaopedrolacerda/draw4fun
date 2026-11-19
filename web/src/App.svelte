@@ -11,6 +11,8 @@
   import { boardFromJson, isClipboard, loadCore, newBoard } from './lib/core';
   import { Editor, INK_COLORS, type PointerInput, type TextRequest, type Tool } from './lib/editor';
   import { Renderer } from './lib/renderer';
+  import { BACKGROUNDS, DEFAULT_BACKGROUND, displayInk, isDark } from './lib/background';
+  import { DEFAULT_EXPORT } from './lib/exportImage';
   import { cursorFor } from './lib/selection';
   import { ACCEPTED_TYPES, loadImageFile, pickImageFiles, type LoadedImage } from './lib/images';
   import { BLANK_DIAGRAM, TEMPLATES } from './lib/mermaid';
@@ -71,6 +73,10 @@
   let diagram = $state<{ title: string; code: string } | null>(null);
   /** Submenu de diagrama aberto, posicionado embaixo do botão (fora da barra, que rola). */
   let diagramMenu = $state<{ left: number; top: number } | null>(null);
+  /** Cor de fundo do quadro aberto. */
+  let background = $state<string>(DEFAULT_BACKGROUND);
+  /** Menu de fundo aberto, posicionado embaixo do botão. */
+  let backgroundMenu = $state<{ left: number; top: number } | null>(null);
 
   let editor: Editor | null = null;
   let autosaver: Autosaver | null = null;
@@ -117,10 +123,30 @@
     requestDraw();
   }
 
+  function toggleBackgroundMenu(e: MouseEvent): void {
+    if (backgroundMenu) {
+      backgroundMenu = null;
+      return;
+    }
+    commitText();
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    backgroundMenu = { left: Math.max(8, Math.min(r.left, window.innerWidth - 188)), top: r.bottom + 8 };
+  }
+
+  function chooseBackground(next: string): void {
+    backgroundMenu = null;
+    editor?.setBackground(next);
+    syncBackground();
+  }
+
+  function syncBackground(): void {
+    background = editor?.background ?? DEFAULT_BACKGROUND;
+  }
+
   function onWindowPointerDown(e: PointerEvent): void {
-    if (!diagramMenu) return;
     const target = e.target as Element | null;
-    if (!target?.closest('.diagram-menu, .diagram-button')) diagramMenu = null;
+    if (diagramMenu && !target?.closest('.diagram-menu, .diagram-button')) diagramMenu = null;
+    if (backgroundMenu && !target?.closest('.background-menu, .background-button')) backgroundMenu = null;
   }
 
   function requestDraw(): void {
@@ -332,7 +358,7 @@
       return;
     }
     try {
-      const png = renderer.renderToPng(editor.board, ids);
+      const png = renderer.renderToPng(editor.board, ids, { ...DEFAULT_EXPORT, background });
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
       showToast('Copiado como PNG');
     } catch (err) {
@@ -499,8 +525,9 @@
 
   function onKeyDown(e: KeyboardEvent): void {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || diagram) return;
-    if (diagramMenu && e.key === 'Escape') {
+    if ((diagramMenu || backgroundMenu) && e.key === 'Escape') {
       diagramMenu = null;
+      backgroundMenu = null;
       return;
     }
     const mod = e.ctrlKey || e.metaKey;
@@ -642,6 +669,7 @@
       }
       editor = new Editor(board, {
         onDocumentChange: () => {
+          syncBackground();
           requestDraw();
           autosaver?.schedule();
           canUndo = editor?.canUndo ?? false;
@@ -649,6 +677,7 @@
           drive?.localChange();
         },
         onRemoteChange: () => {
+          syncBackground();
           requestDraw();
           autosaver?.schedule();
         },
@@ -661,6 +690,7 @@
       });
       editor.tool = tool;
       editor.ink = { ...editor.ink, color };
+      syncBackground();
       autosaver = new Autosaver(store, () => editor?.board.toJson() ?? '', (s) => (status = s));
       requestDraw();
       startDrive();
@@ -716,7 +746,7 @@
       style:font-size="{textBox.fontPx}px"
       style:line-height={LINE_HEIGHT}
       style:font-family={FONT_FAMILY}
-      style:color={editing.color}
+      style:color={displayInk(editing.color, background)}
       onblur={commitText}
       onkeydown={onTextKeyDown}
     ></textarea>
@@ -764,10 +794,22 @@
         class:active={color === c}
         aria-pressed={color === c}
         aria-label="Cor {c}"
-        style:--swatch={c}
+        style:--swatch={displayInk(c, background)}
         onclick={() => selectColor(c)}
       ></button>
     {/each}
+    <span class="divider" aria-hidden="true"></span>
+    <button
+      class="tool background-button"
+      class:active={backgroundMenu !== null}
+      aria-label="Cor do fundo"
+      aria-haspopup="menu"
+      aria-expanded={backgroundMenu !== null}
+      title="Cor do fundo"
+      onclick={toggleBackgroundMenu}
+    >
+      <span class="background-chip" style:--chip={background}></span>
+    </button>
     {#if selectedCount > 0}
       <span class="divider" aria-hidden="true"></span>
       <button class="tool" aria-label="Copiar como PNG" title="Copiar como PNG — Shift+Alt+C" onclick={copySelectionAsPng}>
@@ -818,7 +860,7 @@
     <p class="toast" role="status">{toast}</p>
   {/if}
 
-  <p class="status" class:error={status === 'error'} aria-live="polite">{statusText[status]}</p>
+  <p class="status" class:error={status === 'error'} class:on-dark={isDark(background)} aria-live="polite">{statusText[status]}</p>
 
   {#if diagramMenu}
     <div class="diagram-menu" role="menu" aria-label="Diagrama" style:left="{diagramMenu.left}px" style:top="{diagramMenu.top}px">
@@ -831,6 +873,29 @@
         <button role="menuitem" onclick={() => openDiagram(t.label, t.code)}>
           <strong>{t.label}</strong>
           <span>{t.description}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  {#if backgroundMenu}
+    <div
+      class="background-menu"
+      role="menu"
+      aria-label="Cor do fundo"
+      style:left="{backgroundMenu.left}px"
+      style:top="{backgroundMenu.top}px"
+    >
+      <p class="menu-title">Fundo</p>
+      {#each BACKGROUNDS as b (b.color)}
+        <button
+          role="menuitemradio"
+          aria-checked={background === b.color}
+          class:active={background === b.color}
+          onclick={() => chooseBackground(b.color)}
+        >
+          <span class="background-chip" style:--chip={b.color}></span>
+          {b.label}
         </button>
       {/each}
     </div>
@@ -981,6 +1046,51 @@
     box-shadow: 0 0 0 2px var(--accent);
   }
 
+  .background-chip {
+    display: block;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: var(--chip);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  }
+
+  .background-menu {
+    position: absolute;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    width: 180px;
+    padding: 6px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  .background-menu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .background-menu button:hover,
+  .background-menu button:focus-visible {
+    background: #f3f1ec;
+  }
+
+  .background-menu button.active {
+    background: var(--accent-soft);
+  }
+
   .diagram-menu {
     position: absolute;
     z-index: 5;
@@ -1077,8 +1187,16 @@
     pointer-events: none;
   }
 
+  .status.on-dark {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
   .status.error {
     color: #b91c1c;
+  }
+
+  .status.error.on-dark {
+    color: #fca5a5;
   }
 
   .notice {

@@ -48,10 +48,24 @@ pub fn merge(local: &Document, remote: &Document) -> Document {
         files.entry(k.clone()).or_insert_with(|| v.clone());
     }
 
+    // Fundo: mesma regra dos elementos (versão maior; empatou, nonce maior).
+    let background = match (&local.background, &remote.background) {
+        (Some(l), Some(r)) => Some(
+            if (r.version, r.nonce) > (l.version, l.nonce) {
+                r
+            } else {
+                l
+            }
+            .clone(),
+        ),
+        (l, r) => l.clone().or_else(|| r.clone()),
+    };
+
     Document {
         schema_version: SCHEMA_VERSION.max(local.schema_version),
         elements,
         files,
+        background,
     }
 }
 
@@ -82,6 +96,7 @@ mod tests {
             schema_version: SCHEMA_VERSION,
             elements,
             files: Default::default(),
+            background: None,
         }
     }
 
@@ -171,5 +186,28 @@ mod tests {
     fn merge_consigo_mesmo_nao_muda_nada() {
         let d = doc(vec![el("a", 1, 0, 0.0), el("b", 2, 3, 4.0)]);
         assert_eq!(merge(&d, &d), d);
+    }
+
+    #[test]
+    fn fundo_mais_novo_vence_dos_dois_lados() {
+        use crate::model::Background;
+        let bg = |color: &str, version, nonce| {
+            Some(Background {
+                color: color.into(),
+                version,
+                nonce,
+            })
+        };
+        let mut local = doc(vec![]);
+        local.background = bg("#000", 2, 5);
+        let mut remote = doc(vec![]);
+        remote.background = bg("#ff0", 3, 1);
+        assert_eq!(merge(&local, &remote).background, bg("#ff0", 3, 1));
+        assert_eq!(merge(&remote, &local).background, bg("#ff0", 3, 1));
+        remote.background = bg("#ff0", 2, 9);
+        assert_eq!(merge(&local, &remote).background, bg("#ff0", 2, 9));
+        assert_eq!(merge(&remote, &local).background, bg("#ff0", 2, 9));
+        remote.background = None;
+        assert_eq!(merge(&remote, &local).background, bg("#000", 2, 5));
     }
 }

@@ -59,6 +59,27 @@ impl Board {
         self.doc.get(id)
     }
 
+    /// Cor de fundo escolhida, ou `None` para o fundo padrão.
+    pub fn background(&self) -> Option<&str> {
+        self.doc.background.as_ref().map(|b| b.color.as_str())
+    }
+
+    /// Troca a cor de fundo. Não entra no desfazer: é uma preferência do quadro, não um
+    /// traço. Devolve `false` se a cor já era essa.
+    pub fn set_background(&mut self, color: &str) -> bool {
+        if self.background() == Some(color) {
+            return false;
+        }
+        let version = self.doc.background.as_ref().map_or(0, |b| b.version) + 1;
+        let nonce = self.rng.next_u32();
+        self.doc.background = Some(crate::model::Background {
+            color: color.to_string(),
+            version,
+            nonce,
+        });
+        true
+    }
+
     /// Ids dos elementos visíveis, do fundo para a frente.
     pub fn visible_ids(&self) -> Vec<String> {
         self.doc.visible().map(|e| e.id.clone()).collect()
@@ -779,5 +800,26 @@ mod tests {
         let b = laptop.add_rectangle(5.0, 5.0, 10.0, 10.0, Style::default());
         phone.merge_remote(laptop.document());
         assert_eq!(phone.visible_ids(), vec![a, b]);
+    }
+
+    #[test]
+    fn trocar_o_fundo_sobe_a_versao_e_vai_para_o_arquivo() {
+        let mut board = Board::new(7);
+        assert_eq!(board.background(), None);
+        assert!(board.set_background("#1c1c1e"));
+        assert!(!board.set_background("#1c1c1e"));
+        assert!(board.set_background("#fdf0a6"));
+        assert_eq!(
+            board.document().background.as_ref().map(|b| b.version),
+            Some(2)
+        );
+        let again = Board::from_json(&board.to_json().unwrap(), 1).unwrap();
+        assert_eq!(again.background(), Some("#fdf0a6"));
+    }
+
+    #[test]
+    fn arquivo_sem_fundo_continua_sem_o_campo() {
+        let board = Board::new(7);
+        assert!(!board.to_json().unwrap().contains("background"));
     }
 }

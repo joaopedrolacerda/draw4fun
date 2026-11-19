@@ -7,6 +7,7 @@ import { decodePath, type PaintMode } from './path';
 import { HANDLES, HANDLE_SIZE, type Rect, corner, groupFrame, selectionFrame } from './selection';
 import { LINE_HEIGHT, fontString, lines } from './text';
 import { DEFAULT_EXPORT, type ExportOptions, exportFrame } from './exportImage';
+import { DEFAULT_BACKGROUND, displayInk, gridDotColor } from './background';
 
 interface Cached {
   version: number;
@@ -47,13 +48,15 @@ export class Renderer {
     dpr: number,
     options: DrawOptions = {},
   ): void {
+    const background = board.background() ?? DEFAULT_BACKGROUND;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    drawDots(ctx, camera, width, height);
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, width, height);
+    drawDots(ctx, camera, width, height, gridDotColor(background));
 
     ctx.setTransform(dpr * camera.zoom, 0, 0, dpr * camera.zoom, -camera.x * camera.zoom * dpr, -camera.y * camera.zoom * dpr);
     const all = board.visibleIds();
-    this.drawElements(ctx, board, all, camera.zoom, options.hiddenId ?? null);
+    this.drawElements(ctx, board, all, camera.zoom, options.hiddenId ?? null, background);
     const seen = new Set(all);
     for (const id of this.cache.keys()) if (!seen.has(id)) this.cache.delete(id);
 
@@ -94,7 +97,7 @@ export class Renderer {
     const sx = frame.pixelWidth / frame.width;
     const sy = frame.pixelHeight / frame.height;
     ctx.setTransform(sx, 0, 0, sy, -frame.x * sx, -frame.y * sy);
-    this.drawElements(ctx, board, ordered, frame.scale, null);
+    this.drawElements(ctx, board, ordered, frame.scale, null, options.background ?? DEFAULT_BACKGROUND);
     return canvas;
   }
 
@@ -107,12 +110,20 @@ export class Renderer {
     );
   }
 
-  private drawElements(ctx: CanvasRenderingContext2D, board: Board, ids: readonly string[], zoom: number, hiddenId: string | null): void {
+  private drawElements(
+    ctx: CanvasRenderingContext2D,
+    board: Board,
+    ids: readonly string[],
+    zoom: number,
+    hiddenId: string | null,
+    background: string,
+  ): void {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (const id of ids) {
       const item = this.lookup(board, id);
       if (!item || id === hiddenId) continue;
+      const color = displayInk(item.color, background);
       if (item.image) {
         this.drawImage(ctx, board, item.image, zoom);
       } else if (item.text) {
@@ -120,14 +131,14 @@ export class Renderer {
         const lh = t.fontSize * LINE_HEIGHT;
         ctx.font = fontString(t.fontSize);
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = item.color;
+        ctx.fillStyle = color;
         // Centro de cada linha, como na caixa de texto: assim o texto não pula ao gravar.
         t.lines.forEach((line, i) => ctx.fillText(line, t.x, t.y + i * lh + lh / 2));
       } else if (item.mode === 'fill') {
-        ctx.fillStyle = item.color;
+        ctx.fillStyle = color;
         ctx.fill(item.path);
       } else {
-        ctx.strokeStyle = item.color;
+        ctx.strokeStyle = color;
         ctx.lineWidth = item.width;
         ctx.stroke(item.path);
       }
@@ -210,12 +221,12 @@ export class Renderer {
 }
 
 /** Grade de pontinhos que acompanha o zoom; some quando fica densa demais. */
-function drawDots(ctx: CanvasRenderingContext2D, c: Camera, width: number, height: number): void {
+function drawDots(ctx: CanvasRenderingContext2D, c: Camera, width: number, height: number, color: string): void {
   let step = GRID_STEP * c.zoom;
   while (step < 12) step *= 2;
   const offsetX = -((c.x * c.zoom) % step);
   const offsetY = -((c.y * c.zoom) % step);
-  ctx.fillStyle = getComputedStyle(ctx.canvas).getPropertyValue('--grid-dot').trim() || '#d9d6cf';
+  ctx.fillStyle = color;
   for (let x = offsetX; x < width; x += step) {
     for (let y = offsetY; y < height; y += step) {
       ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5);
