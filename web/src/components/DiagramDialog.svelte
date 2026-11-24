@@ -1,27 +1,46 @@
 <script lang="ts">
-  // Janela de diagrama em Mermaid: texto à esquerda, prévia à direita. "Inserir" põe o
-  // desenho no quadro como elementos editáveis (padrão) ou como imagem (veja lib/mermaid.ts).
+  // Janela de diagrama: texto à esquerda, prévia à direita. O texto é simples (passos em
+  // português, traduzidos por lib/plainDiagram.ts) ou Mermaid. "Inserir" põe o desenho no
+  // quadro como elementos editáveis (padrão) ou como imagem (veja lib/mermaid.ts).
   import type { LoadedImage } from '../lib/images';
   import { TEMPLATES, renderMermaid, renderMermaidShapes, type DiagramInsert } from '../lib/mermaid';
+  import { BLANK_PLAIN, PLAIN_EXAMPLES, plainToMermaid } from '../lib/plainDiagram';
 
   let {
     title,
     initialCode,
+    initialLanguage = 'mermaid',
     onInsert,
     onClose,
   }: {
     title: string;
     initialCode: string;
+    initialLanguage?: DiagramLanguage;
     onInsert: (result: DiagramInsert) => void;
     onClose: () => void;
   } = $props();
+
+  type DiagramLanguage = 'plain' | 'mermaid';
 
   /** Espera a pessoa parar de digitar antes de redesenhar a prévia. */
   const PREVIEW_DELAY_MS = 350;
 
   // Só o valor inicial importa: depois o texto é da pessoa.
   // svelte-ignore state_referenced_locally
-  let code = $state(initialCode);
+  let text = $state(initialCode);
+  // svelte-ignore state_referenced_locally
+  let language = $state<DiagramLanguage>(initialLanguage);
+  /** Texto simples de antes de passar para Mermaid, para voltar sem perder. */
+  let plainBackup: string | null = null;
+  /** Código Mermaid que vai ser desenhado (traduzido, no texto simples), ou o erro da tradução. */
+  const source = $derived.by((): { code: string; error: string | null } => {
+    if (language === 'mermaid') return { code: text, error: null };
+    try {
+      return { code: plainToMermaid(text), error: null };
+    } catch (err) {
+      return { code: '', error: err instanceof Error ? err.message : String(err) };
+    }
+  });
   let preview = $state<LoadedImage | null>(null);
   /** Código que gerou a prévia atual: se for o mesmo, "Inserir" reaproveita. */
   let previewCode = '';
@@ -38,8 +57,13 @@
   });
 
   $effect(() => {
-    const current = code;
+    const { code: current, error: translateError } = source;
     const mine = ++generation;
+    if (translateError) {
+      error = translateError;
+      loading = false;
+      return;
+    }
     loading = true;
     const timer = setTimeout(async () => {
       try {
@@ -60,6 +84,8 @@
 
   async function insert(): Promise<void> {
     if (inserting) return;
+    if (source.error) return;
+    const code = source.code;
     inserting = true;
     try {
       if (mode === 'shapes') {
@@ -77,9 +103,43 @@
 
   function useTemplate(event: Event): void {
     const select = event.currentTarget as HTMLSelectElement;
-    const template = TEMPLATES.find((t) => t.id === select.value);
-    if (template) code = template.code;
+    const example =
+      language === 'plain' ? PLAIN_EXAMPLES.find((e) => e.id === select.value)?.text : TEMPLATES.find((t) => t.id === select.value)?.code;
+    if (example !== undefined) text = example;
     select.value = '';
+  }
+
+  /** Para Mermaid, leva o código traduzido; de volta, recupera o texto simples de antes. */
+  function setLanguage(next: DiagramLanguage): void {
+    if (next === language) return;
+    if (next === 'mermaid') {
+      plainBackup = text;
+      if (!source.error) text = source.code;
+    } else {
+      text = plainBackup ?? BLANK_PLAIN;
+    }
+    language = next;
+    textarea?.focus();
+  }
+
+  /** Recuo à mão no texto simples: Tab põe dois espaços e Enter mantém o recuo da linha. */
+  function onTextKeyDown(e: KeyboardEvent): void {
+    if (language !== 'plain' || !textarea || e.ctrlKey || e.metaKey || e.altKey) return;
+    const { selectionStart: start, selectionEnd: end, value } = textarea;
+    let insertText: string | null = null;
+    if (e.key === 'Tab' && !e.shiftKey) {
+      insertText = '  ';
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+      const indent = /^[ \t]*/.exec(value.slice(lineStart, start))?.[0] ?? '';
+      // Depois de uma pergunta, a resposta já vem recuada.
+      const extra = value.slice(lineStart, start).trimEnd().endsWith('?') ? '  ' : '';
+      insertText = `\n${indent}${extra}`;
+    }
+    if (insertText === null) return;
+    e.preventDefault();
+    textarea.setRangeText(insertText, start, end, 'end');
+    text = textarea.value;
   }
 
   function onKeyDown(e: KeyboardEvent): void {
@@ -98,9 +158,13 @@
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="diagram-title" tabindex="-1" onkeydown={onKeyDown}>
     <header>
       <h2 id="diagram-title">{title}</h2>
+      <div class="language" role="radiogroup" aria-label="Escrever em">
+        <button role="radio" aria-checked={language === 'plain'} onclick={() => setLanguage('plain')}>Texto simples</button>
+        <button role="radio" aria-checked={language === 'mermaid'} onclick={() => setLanguage('mermaid')}>Mermaid</button>
+      </div>
       <select aria-label="Trocar pelo exemplo de outro tipo" onchange={useTemplate}>
         <option value="">Trocar de exemplo…</option>
-        {#each TEMPLATES as t (t.id)}
+        {#each language === 'plain' ? PLAIN_EXAMPLES.map((e) => ({ id: e.id, label: e.label })) : TEMPLATES as t (t.id)}
           <option value={t.id}>{t.label}</option>
         {/each}
       </select>
@@ -109,9 +173,10 @@
     <div class="body">
       <textarea
         bind:this={textarea}
-        bind:value={code}
-        spellcheck="false"
-        aria-label="Código Mermaid"
+        bind:value={text}
+        onkeydown={onTextKeyDown}
+        spellcheck={language === 'plain'}
+        aria-label={language === 'plain' ? 'Passos do diagrama' : 'Código Mermaid'}
         aria-invalid={error !== null}
       ></textarea>
       <div class="preview" aria-live="polite" aria-busy={loading}>
@@ -126,6 +191,10 @@
     <p class="message" class:error={error !== null} role={error ? 'alert' : undefined}>
       {#if error}
         {error}
+      {:else if language === 'plain'}
+        Um passo por linha. Termine com <b>?</b> para uma decisão e escreva as respostas embaixo, com recuo
+        (<b>sim: Assar</b>). <b>volta para X</b> liga num passo já escrito. Linhas
+        <b>Quem -> Para quem: mensagem</b> viram diagrama de sequência.
       {:else}
         Sintaxe do <a href="https://mermaid.js.org/intro/syntax-reference.html" target="_blank" rel="noreferrer">Mermaid</a>.
         {#if mode === 'shapes'}
@@ -148,6 +217,27 @@
 </div>
 
 <style>
+  .language {
+    display: flex;
+    margin-right: auto;
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .language button {
+    padding: 5px 10px;
+    border: 0;
+    background: var(--paper);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .language button[aria-checked='true'] {
+    background: var(--accent);
+    color: white;
+  }
+
   .mode {
     display: flex;
     gap: 14px;

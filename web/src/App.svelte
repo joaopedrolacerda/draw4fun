@@ -15,6 +15,7 @@
   import { DEFAULT_EXPORT } from './lib/exportImage';
   import { ACCEPTED_TYPES, loadImageFile, pickImageFiles, type LoadedImage } from './lib/images';
   import { BLANK_DIAGRAM, TEMPLATES, type DiagramInsert } from './lib/mermaid';
+  import { BLANK_PLAIN } from './lib/plainDiagram';
   import { Autosaver, EmergencyBackup, IndexedDbStore, type SaveStatus } from './lib/storage';
   import { DEFAULT_FONT_SIZE, FONT_FAMILY, LINE_HEIGHT, fontString, measureText, type TextSize } from './lib/text';
 
@@ -68,8 +69,8 @@
   let driveFolderUrl = $state<string | null>(null);
   let drive: DriveController | null = null;
   let canRedo = $state(false);
-  /** Janela de diagrama aberta: título e código inicial. */
-  let diagram = $state<{ title: string; code: string } | null>(null);
+  /** Janela de diagrama aberta: título, texto inicial e se o texto é simples ou Mermaid. */
+  let diagram = $state<{ title: string; code: string; language: 'plain' | 'mermaid' } | null>(null);
   /** Submenu de diagrama aberto, posicionado embaixo do botão (fora da barra, que rola). */
   let diagramMenu = $state<{ left: number; top: number } | null>(null);
   /** Cor de fundo do quadro aberto. */
@@ -108,9 +109,9 @@
     diagramMenu = { left: Math.max(8, Math.min(r.left, window.innerWidth - 268)), top: r.bottom + 8 };
   }
 
-  function openDiagram(title: string, code: string): void {
+  function openDiagram(title: string, code: string, language: 'plain' | 'mermaid' = 'mermaid'): void {
     diagramMenu = null;
-    diagram = { title, code };
+    diagram = { title, code, language };
   }
 
   /** Põe o diagrama no centro da tela, já selecionado para mover ou redimensionar. */
@@ -876,6 +877,10 @@
 
   {#if diagramMenu}
     <div class="diagram-menu" role="menu" aria-label="Diagrama" style:left="{diagramMenu.left}px" style:top="{diagramMenu.top}px">
+      <button role="menuitem" onclick={() => openDiagram('Diagrama em texto simples', BLANK_PLAIN, 'plain')}>
+        <strong>Escrever em texto simples</strong>
+        <span>Um passo por linha, sem código</span>
+      </button>
       <button role="menuitem" onclick={() => openDiagram('Diagrama em Mermaid', BLANK_DIAGRAM)}>
         <strong>Escrever em Mermaid</strong>
         <span>Começar do zero</span>
@@ -914,7 +919,7 @@
   {/if}
 
   {#if diagram}
-    <DiagramDialog title={diagram.title} initialCode={diagram.code} onInsert={insertDiagram} onClose={() => (diagram = null)} />
+    <DiagramDialog title={diagram.title} initialCode={diagram.code} initialLanguage={diagram.language} onInsert={insertDiagram} onClose={() => (diagram = null)} />
   {/if}
 
   {#if notice}
